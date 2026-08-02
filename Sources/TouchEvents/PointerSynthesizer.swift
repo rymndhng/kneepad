@@ -11,14 +11,26 @@ public final class PointerSynthesizer {
     public struct Configuration {
         /// Screen pixels per millimetre of finger travel, before acceleration.
         public var gain = 20.0
-        /// Peak acceleration multiplier for fast movement.
+        /// Peak multiplier for fast movement.
         public var maxAcceleration = 3.0
-        /// Finger speed (mm/s) at which acceleration reaches its midpoint.
+
+        /// Multiplier floor for slow movement.
+        ///
+        /// This is the part that was missing, and it matters more than the
+        /// ceiling. A curve that only ever multiplies *up* passes slow motion
+        /// at full gain — including the deceleration tail in the raw stream,
+        /// which is then multiplied by `gain` and shows up as the cursor
+        /// drifting on after the finger stops. macOS's own curve attenuates
+        /// slow movement well below 1:1, which is both why it feels precise
+        /// and why the tail is invisible in mouse mode.
+        public var minAcceleration = 0.2
+
+        /// Finger speed (mm/s) at which the multiplier is exactly 1, i.e. where
+        /// `gain` applies literally.
         public var accelerationReference = 150.0
-        /// Sharpness of the acceleration knee. 1.0 is a soft, gradual ramp;
-        /// higher keeps slow movement near 1:1 for precision and then climbs
-        /// quickly, which is the shape Apple's curve has.
-        public var accelerationCurve = 1.8
+
+        /// Curve steepness. Higher widens the spread between slow and fast.
+        public var accelerationCurve = 1.2
         public var accelerationEnabled = true
 
         public init() {}
@@ -79,11 +91,14 @@ public final class PointerSynthesizer {
         if configuration.accelerationEnabled, dt > 0 {
             let speed = millimetres.magnitude / dt          // mm/s
             let ratio = speed / configuration.accelerationReference
-            // Raising the ratio to a power puts a knee in the curve: slow
-            // movement stays near unity gain for precision, then gain climbs
-            // steeply. A plain r/(1+r) ramp has no knee and feels mushy.
-            let shaped = pow(ratio, configuration.accelerationCurve)
-            let factor = 1 + (configuration.maxAcceleration - 1) * (shaped / (1 + shaped))
+
+            // A power curve through (1, 1), clamped at both ends. Crucially the
+            // floor is BELOW 1: slow movement is attenuated, not merely
+            // un-amplified. Without that, every slow artefact in the input —
+            // sensor tail included — arrives at full gain.
+            let factor = min(configuration.maxAcceleration,
+                             max(configuration.minAcceleration,
+                                 pow(ratio, configuration.accelerationCurve)))
             scale *= factor
         }
 
