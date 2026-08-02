@@ -5,7 +5,32 @@ swipe) on macOS, entirely from userland — no kext, no DriverKit.
 
 ## Status
 
-Planning. No code yet. Stage 1 is the go/no-go gate.
+**Stage 0 complete.** `hid-descriptor` decodes the descriptor and audits it
+against the PTP profile. Run against hardware it confirmed every hand-decoded
+claim below: Input Mode is feature report 4, touch data is input report 1
+(15 bytes, 2 contacts), X/Y are 0–2048 over 55.0 mm, Scan Time is 100 µs/count,
+mouse fallback is report 6.
+
+**Stage 1 half-verified.** The Input Mode write is confirmed working:
+
+```
+with ID prefix: raw 0403 → body 03  ✓ accepted
+```
+
+Learned along the way: **macOS carries the report-ID byte in feature-report
+buffers in both directions.** `GET` returns it as byte 0, and `SET` must send
+it as byte 0. Getting this wrong made the first attempt fail silently — the
+write returned success while the device stayed in mouse mode.
+
+**Still unverified:** whether report 1 actually streams contacts. That needs
+fingers on the pad, so it can only be confirmed interactively:
+
+```
+./.build/debug/hid-stream          # drag two fingers, watch for two # entries
+./.build/debug/hid-stream --restore   # panic button if the cursor stays dead
+```
+
+Until that passes, Stages 2–5 rest on an unproven assumption.
 
 ---
 
