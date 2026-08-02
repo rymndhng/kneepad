@@ -145,18 +145,20 @@ public struct SmoothingConfiguration {
     /// Cancels the smoothing the trackpad firmware applies before we see the
     /// data — the cause of the deceleration tail after the finger stops.
     ///
-    /// Measured from `hid-stream --trace` on a fast swipe: per-frame deltas
-    /// decay by a near-constant ~0.72 each frame over roughly 85ms, which is
-    /// an IIR low-pass `y[n] = a·x[n] + (1-a)·y[n-1]` with a ≈ 0.28, not a
-    /// finger decelerating. Its exact inverse is
+    /// Modelled as an IIR low-pass `y[n] = a·x[n] + (1-a)·y[n-1]`, whose exact
+    /// inverse is
     ///
     ///     x[n] = y[n] + ((1-a)/a)·(y[n] - y[n-1])
     ///
-    /// so `leadGain` is (1-a)/a ≈ 2.5. Total displacement is preserved — the
-    /// motion is just delivered when it happened instead of trailing after.
+    /// making `leadGain` equal to (1-a)/a. Total displacement is preserved —
+    /// motion is delivered when it happened rather than trailing after.
     ///
-    /// Set to 0 to disable. Too high overshoots and feels jumpy.
-    public var leadGain = 2.5
+    /// ⚠️ How much smoothing the firmware actually applies is NOT well
+    /// established. A first trace suggested a ≈ 0.28 (gain 2.5) over ~85ms,
+    /// but a second trace of the same gesture showed a shorter, less regular
+    /// decay that a single IIR does not fit. The default is deliberately
+    /// conservative until more traces settle it. Set to 0 to disable.
+    public var leadGain = 1.0
     /// Hz. Lower is steadier at rest; too low and slow movement feels sticky.
     public var minCutoff = 1.2
     /// Speed coupling. Higher responds faster but passes more jitter.

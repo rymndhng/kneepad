@@ -30,7 +30,7 @@ func printUsage() {
     SMOOTHING (1€ filter over contact positions)
       touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
       touchd --beta N               speed coupling; higher is snappier (0.25)
-      touchd --lead N               cancel firmware smoothing (default 2.5, 0=off)
+      touchd --lead N               cancel firmware smoothing (default 1.0, 0=off)
       touchd --settle N             how hard a stop is snapped to (default 4)
       touchd --deadband N           mm treated as noise, not lag (default 0.25)
       touchd --no-smoothing         disable filtering entirely
@@ -197,6 +197,10 @@ var scrolls = 0
 /// stationary jitter is what the 1€ filter has to suppress.
 struct FeelStats {
     var intervals: [Double] = []
+    /// Time spent inside the frame handler. If this approaches the report
+    /// interval, processing falls behind during movement and drains after —
+    /// felt as lag that outlasts the finger.
+    var handlerTimes: [Double] = []
     /// Raw positions captured while a single finger was essentially still.
     var stillRaw: [Point] = []
     var stillFiltered: [Point] = []
@@ -205,6 +209,11 @@ struct FeelStats {
         guard interval > 0, interval < 1 else { return }
         intervals.append(interval)
         if intervals.count > 4000 { intervals.removeFirst() }
+    }
+
+    mutating func record(handler seconds: Double) {
+        handlerTimes.append(seconds)
+        if handlerTimes.count > 4000 { handlerTimes.removeFirst() }
     }
 
     static func spread(_ points: [Point]) -> Double {
@@ -230,6 +239,18 @@ struct FeelStats {
                      1 / mean, 1 / median))
         print(String(format: "  worst gap      %.1f ms (p99)  — spikes read as stutter",
                      p99 * 1000))
+        if !handlerTimes.isEmpty {
+            let h = handlerTimes.sorted()
+            let hmean = handlerTimes.reduce(0, +) / Double(handlerTimes.count)
+            let hp99 = h[min(h.count - 1, Int(Double(h.count) * 0.99))]
+            let budget = median * 1000
+            print(String(format: "  handler time   %.2f ms mean, %.2f ms p99  (budget %.1f ms)",
+                         hmean * 1000, hp99 * 1000, budget))
+            if hp99 * 1000 > budget * 0.5 {
+                print("                 ⚠️  over half the frame budget — processing")
+                print("                     will fall behind during fast movement")
+            }
+        }
         print(String(format: "  jitter raw     %.4f mm", FeelStats.spread(stillRaw)))
         print(String(format: "  jitter filtered %.4f mm  (%d samples while still)",
                      FeelStats.spread(stillFiltered), stillFiltered.count))
@@ -254,6 +275,7 @@ session.onForeignReport = { reportID, _ in
 }
 
 session.onFrame = { frame, _ in
+    let handlerStart = showStats ? DispatchTime.now() : nil
     let now = Date()
     let wall = now.timeIntervalSince(lastWall)
     lastWall = now
@@ -319,6 +341,11 @@ session.onFrame = { frame, _ in
         case .move:
             break
         }
+    }
+
+    if let handlerStart {
+        let ns = DispatchTime.now().uptimeNanoseconds - handlerStart.uptimeNanoseconds
+        stats.record(handler: Double(ns) / 1_000_000_000)
     }
 }
 

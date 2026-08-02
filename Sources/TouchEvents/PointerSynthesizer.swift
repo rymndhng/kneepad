@@ -36,10 +36,6 @@ public final class PointerSynthesizer {
     /// slow movement smooth rather than steppy.
     private var cursor: CGPoint?
 
-    /// Beyond this much disagreement with the system cursor, assume something
-    /// else moved it (another device, a window server warp) and resync.
-    private let resyncThreshold: CGFloat = 3.0
-
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
     }
@@ -65,8 +61,12 @@ public final class PointerSynthesizer {
         }
     }
 
-    /// Forget our cursor belief, e.g. when all fingers lift.
-    public func resync() { cursor = nil }
+    /// Forget our cursor belief, e.g. when all fingers lift. The next movement
+    /// re-reads the true position and display layout.
+    public func resync() {
+        cursor = nil
+        cachedBounds = nil
+    }
 
     // MARK: Motion
 
@@ -87,14 +87,18 @@ public final class PointerSynthesizer {
             scale *= factor
         }
 
-        // Track the cursor in full precision, resyncing only if something else
-        // moved it. This is what preserves sub-pixel motion between frames.
-        let system = CGEvent(source: nil)?.location ?? .zero
-        var origin = cursor ?? system
-        if abs(origin.x - system.x) > resyncThreshold
-            || abs(origin.y - system.y) > resyncThreshold {
-            origin = system
-        }
+        // Track the cursor in full precision between frames.
+        //
+        // Deliberately NOT read back from the system each frame. That is a
+        // synchronous round trip to the WindowServer, and running it inside the
+        // HID callback at ~154Hz costs more than the 6.5ms frame budget, so
+        // report processing falls progressively behind during movement and
+        // drains afterwards — felt as lag that persists after the finger stops.
+        //
+        // The position is only sampled when we have no belief, which happens at
+        // the start of a touch (see resync()), so another device moving the
+        // cursor is still picked up.
+        let origin = cursor ?? (CGEvent(source: nil)?.location ?? .zero)
 
         let target = clamp(CGPoint(x: origin.x + millimetres.x * scale,
                                    y: origin.y + millimetres.y * scale))
@@ -125,8 +129,15 @@ public final class PointerSynthesizer {
         event.post(tap: .cghidEventTap)
     }
 
-    /// Keep the cursor inside the union of active displays.
-    private func clamp(_ point: CGPoint) -> CGPoint {
+    /// Union of active display bounds, cached.
+    ///
+    /// Enumerating displays is another per-frame syscall we cannot afford in
+    /// the HID callback. Recomputed only when the cursor belief is dropped,
+    /// which is often enough to notice a display being attached.
+    private var cachedBounds: CGRect?
+
+    private func displayBounds() -> CGRect {
+        if let cachedBounds { return cachedBounds }
         var bounds = CGRect.null
         var count: UInt32 = 0
         CGGetActiveDisplayList(0, nil, &count)
@@ -137,6 +148,13 @@ public final class PointerSynthesizer {
                 bounds = bounds.union(CGDisplayBounds(id))
             }
         }
+        cachedBounds = bounds
+        return bounds
+    }
+
+    /// Keep the cursor inside the union of active displays.
+    private func clamp(_ point: CGPoint) -> CGPoint {
+        let bounds = displayBounds()
         guard !bounds.isNull else { return point }
         return CGPoint(x: min(max(point.x, bounds.minX), bounds.maxX - 1),
                        y: min(max(point.y, bounds.minY), bounds.maxY - 1))
