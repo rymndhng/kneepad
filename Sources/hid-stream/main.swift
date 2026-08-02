@@ -185,26 +185,34 @@ do {
     exit(1)
 }
 
-/// Write the Input Mode feature and read it back to confirm the device accepted it.
+/// Write the Input Mode feature and confirm by read-back.
+///
+/// macOS feature-report framing is ambiguous: IOKit returns the report-ID byte
+/// on GET, and hidapi's darwin backend also sends it on SET — but firmware
+/// varies. So try with the ID prefix, verify, and fall back to without.
 func setInputMode(_ mode: UInt8) -> Bool {
-    var payload = [UInt8](repeating: 0, count: max(1, inputModeLength))
-    payload[0] = mode
-    do {
-        try device.setFeature(reportID: inputModeReportID, bytes: payload)
-    } catch {
-        print("  SET_FEATURE failed: \(error)")
-        return false
+    let body = max(1, inputModeLength)
+    for includeID in [true, false] {
+        let style = includeID ? "with ID prefix" : "without ID prefix"
+        do {
+            try device.setFeature(reportID: inputModeReportID,
+                                  bytes: [mode], includeReportID: includeID)
+        } catch {
+            print("  SET_FEATURE \(style) failed: \(error)")
+            continue
+        }
+        guard let echo = try? device.getFeature(reportID: inputModeReportID,
+                                                bodyLength: body) else {
+            print("  wrote \(mode) \(style); device declined read-back — assuming it took")
+            return true
+        }
+        let value = echo.body.first
+        let ok = value == mode
+        print("  \(style): raw \(hexDump(echo.raw)) → body \(hexDump(echo.body))"
+            + (ok ? "  ✓ accepted" : "  ✗ reads back as \(value.map(String.init) ?? "?")"))
+        if ok { return true }
     }
-    // Read-back is advisory: some firmware refuses GET on this report.
-    if let echo = try? device.getFeature(reportID: inputModeReportID,
-                                         length: max(1, inputModeLength)) {
-        let value = echo.first.map { $0 == mode ? $0 : (echo.count > 1 ? echo[1] : $0) }
-        print("  read back: \(hexDump(echo))"
-            + (value == mode ? "  ✓ accepted" : "  ⚠️ echo does not match \(mode)"))
-    } else {
-        print("  (device declined GET_FEATURE read-back — not necessarily a failure)")
-    }
-    return true
+    return false
 }
 
 if restoreOnly {
@@ -300,28 +308,49 @@ func render(_ body: [UInt8]) {
     }
 }
 
-let bufferSize = max(64, layout.bodyLength + 1)
+// Every input report the descriptor declares, so framing can be judged against
+// the report that actually arrived rather than the one we hoped for.
+let inputBodyLengths: [UInt8: Int] = Dictionary(
+    parsed.reports.filter { $0.kind == .input }.map { ($0.id, $0.byteLength) },
+    uniquingKeysWith: { first, _ in first })
+
+var seenReportIDs: [UInt8: Int] = [:]
+var warnedWrongReport = false
+
+let bufferSize = max(64, (inputBodyLengths.values.max() ?? layout.bodyLength) + 1)
 device.onInputReport(maxLength: bufferSize) { reportID, buffer in
     reportCount += 1
+    seenReportIDs[reportID, default: 0] += 1
 
     if showRaw {
         print("rpt \(reportID)  len \(buffer.count)  \(hexDump(buffer))")
     }
 
-    // Decide the framing question once, from real data rather than assumption.
-    if framing == nil {
+    // Decide framing once, using the expected length for *this* report ID.
+    if framing == nil, let expected = inputBodyLengths[reportID] {
         let detected = ReportFraming.detect(bufferLength: buffer.count,
                                             reportID: reportID,
                                             firstByte: buffer.first,
-                                            expectedBodyLength: layout.bodyLength)
+                                            expectedBodyLength: expected)
         framing = detected
         print("Framing: IOKit buffer \(detected == .includesReportID ? "INCLUDES" : "omits") "
-            + "the report-ID byte (len \(buffer.count), descriptor body \(layout.bodyLength))")
+            + "the report-ID byte (report \(reportID), len \(buffer.count), body \(expected))")
         print("Move fingers on the trackpad. Ctrl-C to stop and restore mouse mode.\n")
         startedAt = Date()
     }
 
-    guard reportID == layout.reportID else { return }
+    guard reportID == layout.reportID else {
+        // Traffic on another report means the mode switch silently failed.
+        if !warnedWrongReport {
+            warnedWrongReport = true
+            print("""
+            ⚠️  Receiving input report \(reportID), not \(layout.reportID).
+                Report \(reportID) is the mouse-mode collection — the device is still
+                in mouse mode, so the Input Mode write did not take effect.
+            """)
+        }
+        return
+    }
     render(framing!.body(buffer))
 }
 
@@ -345,6 +374,10 @@ atexit {
     if reportCount > 0 {
         print(String(format: "\n%d reports in %.1fs (%.0f/s)",
                      reportCount, elapsed, Double(reportCount) / max(elapsed, 0.001)))
+        let breakdown = seenReportIDs.sorted { $0.key < $1.key }
+            .map { "report \($0.key): \($0.value)" }
+            .joined(separator: ", ")
+        print("  \(breakdown)")
     }
 }
 

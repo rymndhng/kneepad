@@ -79,20 +79,33 @@ public final class HIDDevice {
 
     // MARK: Feature reports
 
-    public func setFeature(reportID: UInt8, bytes: [UInt8]) throws {
-        var payload = bytes
+    /// macOS is inconsistent about whether feature-report buffers carry the
+    /// report-ID byte. Empirically IOKit *returns* it on GET, and hidapi's
+    /// darwin backend also *sends* it on SET — but firmware varies, so callers
+    /// can choose and verify rather than assume.
+    public func setFeature(reportID: UInt8, bytes: [UInt8],
+                           includeReportID: Bool = true) throws {
+        var payload = (includeReportID && reportID != 0) ? [reportID] + bytes : bytes
         let result = IOHIDDeviceSetReport(
             ref, kIOHIDReportTypeFeature, CFIndex(reportID), &payload, payload.count)
         guard result == kIOReturnSuccess else { throw HIDError.setReportFailed(result) }
     }
 
-    public func getFeature(reportID: UInt8, length: Int) throws -> [UInt8] {
-        var buffer = [UInt8](repeating: 0, count: length)
-        var size = CFIndex(length)
+    /// Returns the report body with any leading report-ID byte stripped, plus
+    /// the untouched buffer for diagnostics.
+    public func getFeature(reportID: UInt8, bodyLength: Int) throws -> (body: [UInt8], raw: [UInt8]) {
+        // Ask for one extra byte so a returned report ID cannot truncate the body.
+        var buffer = [UInt8](repeating: 0, count: bodyLength + 1)
+        var size = CFIndex(buffer.count)
         let result = IOHIDDeviceGetReport(
             ref, kIOHIDReportTypeFeature, CFIndex(reportID), &buffer, &size)
         guard result == kIOReturnSuccess else { throw HIDError.getReportFailed(result) }
-        return Array(buffer.prefix(max(0, Int(size))))
+
+        let raw = Array(buffer.prefix(max(0, Int(size))))
+        if reportID != 0, raw.count == bodyLength + 1, raw.first == reportID {
+            return (Array(raw.dropFirst()), raw)
+        }
+        return (Array(raw.prefix(bodyLength)), raw)
     }
 
     // MARK: Input reports
