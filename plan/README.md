@@ -22,15 +22,14 @@ buffers in both directions.** `GET` returns it as byte 0, and `SET` must send
 it as byte 0. Getting this wrong made the first attempt fail silently — the
 write returned success while the device stayed in mouse mode.
 
-**Still unverified:** whether report 1 actually streams contacts. That needs
-fingers on the pad, so it can only be confirmed interactively:
+**Stage 1 complete — GO.** Confirmed interactively: report 1 streams live
+contacts once Input Mode is 3. The device does real multitouch, and the
+remaining stages are ordinary software.
 
 ```
-./.build/debug/hid-stream          # drag two fingers, watch for two # entries
+./.build/debug/hid-stream             # live contact view
 ./.build/debug/hid-stream --restore   # panic button if the cursor stays dead
 ```
-
-Until that passes, Stages 2–5 rest on an unproven assumption.
 
 ---
 
@@ -168,10 +167,31 @@ callback, print contacts.
 If two fingers on the pad produce two moving (x,y) pairs, the rest of this plan
 is ordinary application code. If not, the plan needs rethinking.
 
-### Stage 2 — Contact tracking
-Turn per-report snapshots into persistent finger tracks: birth/death, contact ID
-reuse, velocity. Compute velocity from the **Scan Time** field (100 µs units),
-not wall-clock — USB batching makes host timestamps jittery.
+### Stage 2 — Contact tracking ✅
+`HIDCore/ContactTracker.swift`, driven by `hid-track`.
+
+Turns per-report snapshots into persistent finger tracks: birth/death, contact
+ID reuse, velocity. Velocity comes from the **Scan Time** field (100 µs units)
+rather than wall-clock, because USB batching makes host arrival times jittery.
+
+Design notes:
+
+- Track IDs are monotonic and never reused, unlike the hardware's Contact
+  Identifier, which is recycled as fingers lift.
+- Everything is in **millimetres**, converted using the descriptor's own
+  physical ranges, so gesture thresholds are device-independent.
+- Association is by hardware Contact Identifier. `idChurnDetected` flags the
+  case where that assumption breaks, which would force nearest-neighbour
+  matching instead — not built until proven necessary.
+- `TwoFingerState` exposes centroid, spread and angle: the three quantities
+  scroll, pinch and rotate are built from.
+
+**Testing:** `swift run hidcore-tests` — 22 tests, no hardware needed. Runs as
+a plain executable because this Command Line Tools install ships neither a
+usable XCTest nor a working `Testing.framework` (the latter links
+`lib_TestingInterop.dylib`, which is absent from the system). Layout discovery
+and report decoding are tested against a captured copy of the real Voyager
+descriptor in `VoyagerFixture.swift`.
 
 ### Stage 3 — Pointer and click
 In PTP mode the device stops sending Report 6, so we inherit the cursor.

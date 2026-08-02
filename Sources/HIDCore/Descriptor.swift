@@ -101,6 +101,8 @@ public enum ReportKind: String {
 
 public struct MainFlags {
     public let raw: UInt32
+    public init(raw: UInt32) { self.raw = raw }
+
     public var isConstant: Bool { raw & 0x01 != 0 }
     public var isVariable: Bool { raw & 0x02 != 0 }
     public var isRelative: Bool { raw & 0x04 != 0 }
@@ -132,6 +134,28 @@ public struct HIDField {
     public let unitExponent: Int
     public let flags: MainFlags
     public let path: [String]
+
+    public init(reportID: UInt8, kind: ReportKind, bitOffset: Int, bitSize: Int,
+                usagePage: UInt16, usage: UInt16,
+                logicalMin: Int, logicalMax: Int,
+                physicalMin: Int, physicalMax: Int,
+                unit: UInt32, unitExponent: Int,
+                flags: MainFlags, path: [String]) {
+        self.reportID = reportID
+        self.kind = kind
+        self.bitOffset = bitOffset
+        self.bitSize = bitSize
+        self.usagePage = usagePage
+        self.usage = usage
+        self.logicalMin = logicalMin
+        self.logicalMax = logicalMax
+        self.physicalMin = physicalMin
+        self.physicalMax = physicalMax
+        self.unit = unit
+        self.unitExponent = unitExponent
+        self.flags = flags
+        self.path = path
+    }
 
     public var isSigned: Bool { logicalMin < 0 }
     public var name: String { usageName(page: usagePage, usage: usage) }
