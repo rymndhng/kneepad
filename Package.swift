@@ -15,6 +15,16 @@ let package = Package(
         .executableTarget(name: "hid-stream", dependencies: ["HIDCore"]),
         // Stage 2 — follow fingers across frames.
         .executableTarget(name: "hid-track", dependencies: ["HIDCore"]),
+        // Event synthesis. Split from HIDCore so the hardware layer stays free
+        // of CoreGraphics and the recognizers remain testable offline.
+        .target(
+            name: "TouchEvents",
+            dependencies: ["HIDCore"],
+            linkerSettings: [.linkedFramework("CoreGraphics"),
+                             .linkedFramework("ApplicationServices")]
+        ),
+        // Stage 4 — two-finger scrolling.
+        .executableTarget(name: "touch-scroll", dependencies: ["HIDCore", "TouchEvents"]),
         // Tests run as a plain executable: this Command Line Tools install has
         // neither a usable XCTest nor a working Testing.framework.
         //   swift run hidcore-tests

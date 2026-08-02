@@ -1,0 +1,134 @@
+import Foundation
+import HIDCore
+
+// The scroll recognizer is a state machine over tracked contacts. These tests
+// drive it with synthetic frames so the phase transitions, activation
+// threshold and pinch rejection are all checked without hardware.
+
+private let modulus = 65536
+private let tick = 0.0001
+
+private func makeTracker() -> ContactTracker {
+    ContactTracker(scanTimeModulus: modulus, secondsPerCount: tick)
+}
+
+private func contact(_ id: Int, _ x: Double, _ y: Double, confident: Bool = true) -> Contact {
+    Contact(hardwareID: id, rawX: Int(x), rawY: Int(y),
+            position: Point(x: x, y: y), confident: confident)
+}
+
+private func frame(_ contacts: [Contact], at scanTime: Int) -> Frame {
+    Frame(contacts: contacts, declaredCount: contacts.count, scanTime: scanTime)
+}
+
+/// Feed a frame through tracker + recognizer, as the daemon does.
+private func step(_ tracker: ContactTracker, _ recognizer: ScrollRecognizer,
+                  _ contacts: [Contact], at scanTime: Int) -> ScrollUpdate? {
+    tracker.update(frame(contacts, at: scanTime))
+    return recognizer.update(tracks: tracker.active)
+}
+
+func runScrollRecognizerTests() {
+    TestRunner.suite("Scroll recognition") {
+
+        TestRunner.test("a resting pair does not scroll") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            expectNil(step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0))
+            // Jitter well under the activation threshold.
+            expectNil(step(tracker, recognizer,
+                           [contact(0, 10.2, 10.1), contact(1, 30.1, 10.2)], at: 1000))
+        }
+
+        TestRunner.test("moving past the activation distance begins a scroll") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 10, 15), contact(1, 30, 15)], at: 1000))
+            check(update.phase == .began, "expected began, got \(update.phase)")
+            expectClose(update.delta.y, 5, 0.001, "centroid moved 5mm")
+            check(recognizer.isScrolling, "recognizer is now active")
+        }
+
+        TestRunner.test("subsequent motion reports incremental deltas") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+            _ = step(tracker, recognizer, [contact(0, 10, 15), contact(1, 30, 15)], at: 1000)
+
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 10, 18), contact(1, 30, 18)], at: 2000))
+            check(update.phase == .changed, "expected changed, got \(update.phase)")
+            expectClose(update.delta.y, 3, 0.001, "delta is since the last frame, not the start")
+        }
+
+        TestRunner.test("lifting a finger ends the scroll") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+            _ = step(tracker, recognizer, [contact(0, 10, 15), contact(1, 30, 15)], at: 1000)
+
+            let update = try require(step(tracker, recognizer, [contact(0, 10, 15)], at: 2000))
+            check(update.phase == .ended, "expected ended, got \(update.phase)")
+            check(!recognizer.isScrolling, "recognizer is idle again")
+        }
+
+        TestRunner.test("ending carries velocity for momentum") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 0), contact(1, 30, 0)], at: 0)
+            // 1000 counts = 0.1s, 10mm → 100 mm/s instantaneous.
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 1000)
+            _ = step(tracker, recognizer, [contact(0, 10, 20), contact(1, 30, 20)], at: 2000)
+
+            let update = try require(step(tracker, recognizer, [], at: 3000))
+            check(update.phase == .ended, "expected ended")
+            check(update.velocity.y > 0, "velocity must survive into the ended update")
+        }
+
+        TestRunner.test("a pinch is not treated as a scroll") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+            // Fingers separate 10mm while the centroid barely moves.
+            expectNil(step(tracker, recognizer,
+                           [contact(0, 5, 10), contact(1, 35, 10)], at: 1000),
+                      "spread change dominates centroid travel")
+            check(!recognizer.isScrolling, "must not have engaged")
+        }
+
+        TestRunner.test("one finger never scrolls") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10)], at: 0)
+            expectNil(step(tracker, recognizer, [contact(0, 10, 30)], at: 1000))
+        }
+
+        TestRunner.test("a non-confident contact is excluded") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer,
+                     [contact(0, 10, 10), contact(1, 30, 10, confident: false)], at: 0)
+            expectNil(step(tracker, recognizer,
+                           [contact(0, 10, 20), contact(1, 30, 20, confident: false)], at: 1000),
+                      "a palm plus a finger is not a two-finger scroll")
+        }
+
+        TestRunner.test("horizontal scrolling works the same way") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 10, 30)], at: 0)
+
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 18, 10), contact(1, 18, 30)], at: 1000))
+            check(update.phase == .began, "expected began")
+            expectClose(update.delta.x, 8, 0.001)
+            expectClose(update.delta.y, 0, 0.001)
+        }
+
+        TestRunner.test("a second scroll can start after the first ends") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+            _ = step(tracker, recognizer, [contact(0, 10, 15), contact(1, 30, 15)], at: 1000)
+            _ = step(tracker, recognizer, [], at: 2000)   // lift
+
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 3000)
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 10, 16), contact(1, 30, 16)], at: 4000))
+            check(update.phase == .began, "a fresh gesture must begin cleanly")
+        }
+    }
+}

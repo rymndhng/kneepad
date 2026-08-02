@@ -199,13 +199,34 @@ Relative motion from the primary contact via `CGEventCreateMouseEvent`, plus
 palm/thumb rejection using the Confidence bit and contact ordering. Needs a
 pointer acceleration curve — raw deltas feel awful.
 
-### Stage 4 — Scroll
-`CGEventCreateScrollWheelEvent2` with `kCGScrollEventUnitPixel`, plus phase
-fields (`kCGScrollWheelEventScrollPhase` / `MomentumPhase`) so apps get proper
-began/changed/ended and rubber-banding. Then a momentum simulator for post-lift
-inertia.
+### Stage 4 — Scroll ✅ (built, needs feel-testing)
+`HIDCore/ScrollRecognizer.swift` + `TouchEvents/ScrollSynthesizer.swift`,
+driven by `touch-scroll`.
 
-*Probably delivers 80% of the value on its own.*
+Recognition is a pure state machine (idle → pending → scrolling) kept free of
+CoreGraphics so it stays testable offline. Synthesis uses
+`CGEvent(scrollWheelEvent2Source:units:.pixel …)` with
+`scrollWheelEventIsContinuous` plus the phase fields, so apps get proper
+began/changed/ended and rubber-banding rather than discrete wheel clicks.
+Momentum is a decaying-velocity timer emitting the momentum phases.
+
+Design notes:
+
+- **Activation distance** (1 mm default) stops a resting pair from nudging
+  the view.
+- **Pinch rejection**: if the gap between fingers changes faster than the
+  centroid translates, it's a pinch, not a scroll — refuse to engage.
+- **Sub-pixel residual** is carried between events so slow drags aren't
+  truncated to zero by integer pixel deltas.
+- Velocity is carried in the recognizer's `scrolling` state, because by the
+  time both fingers lift their tracks are gone. A test caught this — momentum
+  was silently seeded with zero.
+
+**Needs two permissions**: Input Monitoring (to read) *and* Accessibility (to
+post). Without Accessibility, `CGEventPost` silently does nothing.
+
+Still unvalidated by hand: direction, gain, and momentum feel. Flags exist for
+all three (`--reverse`, `--gain`, `--friction`, `--no-momentum`).
 
 ### Stage 5 — Pinch / rotate / swipe
 macOS has **no public API** to synthesize these. The working technique is

@@ -8,5 +8,6 @@ import Foundation
 
 runDescriptorTests()
 runContactTrackerTests()
+runScrollRecognizerTests()
 
 exit(TestRunner.summarize())
