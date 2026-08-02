@@ -54,7 +54,7 @@ public final class OneEuroFilter {
 
     public init(minCutoff: Double = 1.0, beta: Double = 0.25,
                 derivativeCutoff: Double = 1.0,
-                settleGain: Double = 0.4, settleDeadband: Double = 0.25) {
+                settleGain: Double = 4.0, settleDeadband: Double = 0.25) {
         self.minCutoff = minCutoff
         self.beta = beta
         self.derivativeCutoff = derivativeCutoff
@@ -100,9 +100,22 @@ public final class OneEuroPointFilter {
     private let x: OneEuroFilter
     private let y: OneEuroFilter
 
-    public init(minCutoff: Double = 1.0, beta: Double = 0.25) {
-        x = OneEuroFilter(minCutoff: minCutoff, beta: beta)
-        y = OneEuroFilter(minCutoff: minCutoff, beta: beta)
+    public init(minCutoff: Double = 1.0, beta: Double = 0.25,
+                settleGain: Double = 4.0, settleDeadband: Double = 0.25) {
+        x = OneEuroFilter(minCutoff: minCutoff, beta: beta,
+                          settleGain: settleGain, settleDeadband: settleDeadband)
+        y = OneEuroFilter(minCutoff: minCutoff, beta: beta,
+                          settleGain: settleGain, settleDeadband: settleDeadband)
+    }
+
+    public var settleGain: Double {
+        get { x.settleGain }
+        set { x.settleGain = newValue; y.settleGain = newValue }
+    }
+
+    public var settleDeadband: Double {
+        get { x.settleDeadband }
+        set { x.settleDeadband = newValue; y.settleDeadband = newValue }
     }
 
     public var minCutoff: Double {
@@ -132,6 +145,11 @@ public struct SmoothingConfiguration {
     public var minCutoff = 1.2
     /// Speed coupling. Higher responds faster but passes more jitter.
     public var beta = 0.25
+    /// How hard residual lag opens the cutoff, so a stop settles at once
+    /// instead of coasting. See OneEuroFilter.settleGain.
+    public var settleGain = 4.0
+    /// Error below this is treated as sensor noise rather than lag.
+    public var settleDeadband = 0.25
 
     public init() {}
 }

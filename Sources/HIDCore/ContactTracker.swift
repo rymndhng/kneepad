@@ -168,11 +168,16 @@ public final class ContactTracker {
         if let existing = filters[contact.hardwareID] {
             filter = existing
         } else {
-            filter = OneEuroPointFilter(minCutoff: smoothing.minCutoff, beta: smoothing.beta)
+            filter = OneEuroPointFilter(minCutoff: smoothing.minCutoff,
+                                        beta: smoothing.beta,
+                                        settleGain: smoothing.settleGain,
+                                        settleDeadband: smoothing.settleDeadband)
             filters[contact.hardwareID] = filter
         }
         filter.minCutoff = smoothing.minCutoff
         filter.beta = smoothing.beta
+        filter.settleGain = smoothing.settleGain
+        filter.settleDeadband = smoothing.settleDeadband
 
         return Contact(hardwareID: contact.hardwareID,
                        rawX: contact.rawX, rawY: contact.rawY,
