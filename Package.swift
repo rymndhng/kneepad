@@ -27,6 +27,8 @@ let package = Package(
         .executableTarget(name: "touch-scroll", dependencies: ["HIDCore", "TouchEvents"]),
         // Stage 5 recon — learn the undocumented gesture CGEvent encoding.
         .executableTarget(name: "gesture-probe", dependencies: ["HIDCore", "TouchEvents"]),
+        // Stage 5 — post candidate gesture events and see what responds.
+        .executableTarget(name: "gesture-emit", dependencies: ["HIDCore", "TouchEvents"]),
         // Stages 3 + 4 — the actual driver: pointer, taps and scrolling.
         .executableTarget(name: "touchd", dependencies: ["HIDCore", "TouchEvents"]),
         // Tests run as a plain executable: this Command Line Tools install has

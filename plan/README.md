@@ -359,12 +359,47 @@ on a `.mayBegin` event.
 Housekeeping, identical on every event, not gesture data:
 39, 40, 41, 45, 50, 55, 58, 85, 87, 101, 169.
 
-Open questions:
+All five phases have now been captured: `.mayBegin` (128), `.began` (1),
+`.stationary` (2), `.changed` (4), `.ended` (8).
 
-- **Only type 29 appeared at `.cghidEventTap`.** No Magnify (30), Rotate (18)
-  or Swipe (31). Hypothesis: those are synthesised above the HID tap, so the
-  probe now defaults to `.cgSessionEventTap`.
-- Which gesture produced the captured values is unknown — the first run mixed
-  several. Runs must be one gesture at a time, hence `--label`.
-- `.began` (1) and `.changed` (4) phases were never captured, so the
-  mid-gesture payload shape is still unseen.
+### What observation could not settle
+
+Three labelled runs on a Magic Trackpad:
+
+| Run | primary value | secondary value |
+|---|---|---|
+| pinch out | +0.489 | −4.919 |
+| rotate cw | −2.740 | −0.222 |
+| swipe left | 4 → 22 → 13 ramp | 2, 5, 2, 1 |
+
+The roles do not hold across gestures. If `primary` were magnification, a
+*rotate* would not produce −2.74 of it while showing only −0.22 of rotation.
+
+Two further negatives:
+
+- **Field 110 is 6 on every gesture** — pinch, rotate and swipe alike. It is
+  not the gesture discriminator its `IOHIDEventType` reading suggested.
+- **Types 30 (Magnify), 18 (Rotate) and 31 (Swipe) never appear**, at
+  `.cghidEventTap`, `.cgSessionEventTap` or `.cgAnnotatedSessionEventTap`.
+
+Working hypothesis: type-29 events are a generic gesture *envelope*, and real
+pinch/rotate recognition happens in a layer that never surfaces as a CGEvent —
+most likely `MultitouchSupport`, which only Apple devices feed. If that is
+right, Stage 5 is where the userland approach reaches its ceiling.
+
+### Synthesis test
+
+`gesture-emit` posts candidate type-29 events. Injection is confirmed to work
+structurally: `gesture-probe` catches the synthetic events with correct phases
+and values (field 164 = `0x3E000000` = 0.125, matching a 0.5 total over 4
+steps). **Whether any app responds is still unverified** — that needs a human
+watching a window.
+
+```
+open -a Preview <some image>
+./.build/debug/gesture-emit --delay 3 --pinch 0.5 --verbose
+```
+
+If nothing zooms, try `--hid-type 7` (Scale) and `--hid-type 8` (Zoom). If
+those also do nothing, the remaining route is Mac Mouse Fix's implementation —
+GPL-3, so read it for the constants and reimplement rather than copy.

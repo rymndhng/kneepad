@@ -107,11 +107,20 @@ func hidTypeName(_ value: Int64) -> String {
 
 /// Integer fields carry Float32 bit patterns; 0x80000000 is -0.0, meaning
 /// "no value". Reinterpreting makes the payload legible.
-func asFloat(_ raw: Int64) -> String {
+///
+/// Confirmed by hand against captured data:
+///   0x3EFA4200 → 0.488785   (magnification on a pinch-out)
+///   0xC09D67C0 → −4.918915  (rotation in degrees)
+func asFloat(_ raw: Int64) -> String? {
     let bits = UInt32(bitPattern: Int32(truncatingIfNeeded: raw))
-    if bits == 0x8000_0000 { return "−0.0 (absent)" }
+    if bits == 0x8000_0000 { return "−0.0 absent" }
+
     let value = Float(bitPattern: bits)
-    guard value.isFinite else { return "not a float" }
+    guard value.isFinite, value != 0 else { return nil }
+    // Plain small integers are counts and coordinates, not bit patterns.
+    if abs(raw) < 100_000 { return nil }
+    // A bit pattern that decodes to an absurd magnitude probably isn't one.
+    guard abs(value) > 1e-6, abs(value) < 1e6 else { return nil }
     return String(format: "%.6f", value)
 }
 
