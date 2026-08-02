@@ -259,21 +259,58 @@ Two bugs found by using it, both only visible on a fast release:
   before the lift. The first fix (median of smoothed velocity) overcorrected and
   made a deliberate stop fling — caught by a test, not by hand.
 
-### Stage 5 — Pinch / rotate / swipe
-macOS has **no public API** to synthesize these. The working technique is
-constructing `CGEvent`s of type 29 (`NSEventTypeGesture`) and setting
-undocumented integer fields for gesture subtype and magnitude.
+### Stage 5 — Pinch / rotate / swipe 🔬 (recon tool built, not yet implemented)
+macOS has **no public API** to synthesize these. The values live in
+undocumented `CGEvent` fields, and guessing the field numbers produces events
+that are *silently ignored* — the worst possible failure mode, since nothing
+errors and nothing happens.
 
-Prior art: **Mac Mouse Fix** (`TouchSimulator.m`, `GestureScrollSimulator.swift`)
-has a battle-tested implementation.
+So rather than trust remembered constants, **measure**. `gesture-probe`
+installs a listen-only `CGEventTap` over the gesture event types
+(18 rotate, 29 gesture, 30 magnify, 31 swipe, …) and dumps every populated
+field of whatever Apple's own trackpad emits. A Magic Trackpad is paired on
+this machine, so the real encoding can be read straight off the wire.
+
+```
+./.build/debug/gesture-probe        # then pinch on the APPLE trackpad
+```
+
+Once the field layout is known, the synthesizer is straightforward — the
+recognizer side already exists in embryo as `TwoFingerState` (spread → pinch,
+angle → rotation).
+
+Prior art if the probe comes up short: **Mac Mouse Fix**
+(`TouchSimulator.m`, `GestureScrollSimulator.swift`).
 
 > ⚠️ Mac Mouse Fix is GPL-3. Read it to learn the field constants, but
 > reimplement from the constants rather than copying code, unless we're happy
 > for teach-touch to be GPL.
 
-### Stage 6 — Packaging
-LaunchAgent plist, Input Monitoring (TCC) grant, config file, signed +
-notarized build if this is ever shared.
+Note the 2-contact ceiling from the Risks table: three-finger swipes are not
+available from this hardware regardless.
+
+### Stage 6 — Packaging ✅ (written, not yet installed)
+`scripts/install-agent.sh` / `scripts/uninstall-agent.sh`.
+
+Builds release binaries, installs to `~/.local/bin`, writes a LaunchAgent
+plist to `~/Library/LaunchAgents/dev.rymndhng.teach-touch.plist`, and
+bootstraps it. `KeepAlive` with a 5 s `ThrottleInterval` so a crash loop backs
+off instead of spinning. Logs to `~/Library/Logs/teach-touch/`.
+
+**The gotcha: TCC is per-binary, not per-user.** The installed copy at
+`~/.local/bin/touchd` is a *different binary* from the one run out of
+`.build/`, so it needs its own Input Monitoring and Accessibility grants.
+Approving your terminal earlier does not carry over.
+
+`hid-stream` is installed alongside `touchd` deliberately: it is the panic
+button (`hid-stream --restore`) if the daemon ever dies without putting the
+device back in mouse mode, which otherwise leaves you with no cursor.
+
+Note this toolchain puts release output in `.build/out/Products/Release`, not
+`.build/release`, so the scripts ask `swift build --show-bin-path` rather than
+assuming.
+
+Not done: code signing and notarization. Only needed if this is ever shared.
 
 ---
 
