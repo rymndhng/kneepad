@@ -5,6 +5,7 @@ final class LowPassFilter {
     private var value: Double?
 
     var hasValue: Bool { value != nil }
+    var current: Double? { value }
 
     func filter(_ x: Double, alpha: Double) -> Double {
         let result = value.map { alpha * x + (1 - alpha) * $0 } ?? x
@@ -33,15 +34,32 @@ public final class OneEuroFilter {
     /// Cutoff for the derivative estimate itself.
     public var derivativeCutoff: Double
 
+    /// How hard residual error opens the cutoff.
+    ///
+    /// Without this the filter coasts after you stop: fast movement leaves the
+    /// output lagging behind, and when the finger halts the speed term
+    /// collapses back to `minCutoff`, so that accumulated lag bleeds out over a
+    /// ~130ms tail instead of being delivered. Driving the cutoff from the
+    /// error as well means a stop settles in a couple of frames.
+    public var settleGain: Double
+
+    /// Error below this is sensor noise, not lag, and must not open the cutoff
+    /// — otherwise a resting finger's jitter would defeat the smoothing.
+    /// In input units, i.e. millimetres.
+    public var settleDeadband: Double
+
     private let xFilter = LowPassFilter()
     private let dxFilter = LowPassFilter()
     private var lastValue: Double?
 
     public init(minCutoff: Double = 1.0, beta: Double = 0.25,
-                derivativeCutoff: Double = 1.0) {
+                derivativeCutoff: Double = 1.0,
+                settleGain: Double = 0.4, settleDeadband: Double = 0.25) {
         self.minCutoff = minCutoff
         self.beta = beta
         self.derivativeCutoff = derivativeCutoff
+        self.settleGain = settleGain
+        self.settleDeadband = settleDeadband
     }
 
     /// Smoothing factor for a given cutoff and timestep.
@@ -59,7 +77,14 @@ public final class OneEuroFilter {
         lastValue = x
         let smoothedDx = dxFilter.filter(dx, alpha: alpha(cutoff: derivativeCutoff, dt: dt))
 
-        let cutoff = minCutoff + beta * abs(smoothedDx)
+        // How far behind the output currently is. Anything above the deadband
+        // is real lag that should be delivered, not noise to be suppressed.
+        let error = abs(x - (xFilter.current ?? x))
+        let excess = max(0, error - settleDeadband)
+
+        let cutoff = minCutoff
+            + beta * abs(smoothedDx)
+            + settleGain * excess / dt
         return xFilter.filter(x, alpha: alpha(cutoff: cutoff, dt: dt))
     }
 

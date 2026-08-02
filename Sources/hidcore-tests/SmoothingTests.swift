@@ -57,6 +57,49 @@ func runSmoothingTests() {
             check(lag < 1.2, "lag of \(lag)mm is too much to feel connected")
         }
 
+        // Reported from real use: "when I stop my finger there's lingering
+        // deceleration". Fast motion leaves the output behind; if the cutoff
+        // collapses the instant speed hits zero, that lag dribbles out as a
+        // visible coast.
+        TestRunner.test("stopping settles promptly instead of coasting") {
+            let filter = OneEuroFilter(minCutoff: 1.2, beta: 0.25)
+            var position = 0.0
+
+            for _ in 0..<20 {                 // 200 mm/s
+                position += 200 * dt
+                _ = filter.filter(position, dt: dt)
+            }
+
+            // Finger stops dead. Measure motion still being emitted after.
+            var previous = filter.filter(position, dt: dt)
+            var residual: [Double] = []
+            for _ in 0..<10 {
+                let output = filter.filter(position, dt: dt)
+                residual.append(abs(output - previous))
+                previous = output
+            }
+
+            // Within three frames of stopping, output motion must be negligible.
+            let afterThree = residual.dropFirst(3).reduce(0, +)
+            check(afterThree < 0.05,
+                  "still emitting \(afterThree)mm of motion 3 frames after stopping")
+        }
+
+        TestRunner.test("settling does not defeat jitter suppression") {
+            // The deadband is what keeps resting noise from opening the cutoff.
+            let filter = OneEuroFilter(minCutoff: 1.2, beta: 0.25)
+            var noise = Noise()
+            var raw: [Double] = []
+            var filtered: [Double] = []
+            for _ in 0..<300 {
+                let sample = 20.0 + noise.next(0.15)
+                raw.append(sample)
+                filtered.append(filter.filter(sample, dt: dt))
+            }
+            check(spread(Array(filtered.suffix(200))) < spread(Array(raw.suffix(200))) * 0.5,
+                  "settle term must not let resting jitter through")
+        }
+
         TestRunner.test("higher beta reduces lag") {
             func lag(beta: Double) -> Double {
                 let filter = OneEuroFilter(minCutoff: 1.2, beta: beta)

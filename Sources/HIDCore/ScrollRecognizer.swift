@@ -47,6 +47,18 @@ public final class ScrollRecognizer {
     /// lifting reads as a stop rather than a flick.
     public var releaseWindow = 0.05
 
+    /// If the fingers travelled less than `stopTravel` in the last
+    /// `stopWindow` seconds, treat it as a deliberate stop and produce no
+    /// momentum at all, however fast they were moving before.
+    ///
+    /// Needed because `releaseWindow` ends `liftoffDiscardFrames` before the
+    /// lift, so a pause shorter than that gap never lands in the measurement
+    /// and the scroll still flings — which reads as the content refusing to
+    /// stop when you told it to.
+    public var stopWindow = 0.07
+    /// Per-frame travel below which a frame counts as stationary.
+    public var stopFrameTravel = 0.3
+
     private enum State {
         case idle
         /// Two fingers down, not yet moved far enough to commit.
@@ -84,7 +96,33 @@ public final class ScrollRecognizer {
     /// exponential average retains stale speed long after the finger has
     /// stopped, so a drag that halts before lifting would still fling.
     /// Displacement over a fixed window is naturally zero when nothing moved.
+    /// Did the fingers come to rest before lifting?
+    ///
+    /// Counts the unbroken run of stationary frames at the end of the gesture.
+    /// Both a duration and a frame count are required, because liftoff drift
+    /// also looks stationary — but only for a frame or two. Demanding more
+    /// frames than `liftoffDiscardFrames` is what separates "the user stopped"
+    /// from "the fingers are leaving the surface".
+    private func hasStopped() -> Bool {
+        guard history.count >= 2 else { return false }
+
+        var frames = 0
+        var elapsed = 0.0
+        var index = history.count - 1
+        while index > 0 {
+            let step = (history[index].centroid - history[index - 1].centroid).magnitude
+            if step > stopFrameTravel { break }
+            elapsed += history[index].dt
+            frames += 1
+            index -= 1
+        }
+        return elapsed >= stopWindow && frames >= liftoffDiscardFrames + 2
+    }
+
     private func releaseVelocity() -> Point {
+        // A deliberate stop beats any earlier speed.
+        if hasStopped() { return Point(x: 0, y: 0) }
+
         var samples = history
         if samples.count > liftoffDiscardFrames + 1 {
             samples.removeLast(liftoffDiscardFrames)

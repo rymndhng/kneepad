@@ -160,6 +160,31 @@ func runScrollRecognizerTests() {
                   "a deliberate stop must not fling, got \(update.velocity.y) mm/s")
         }
 
+        // Reported from real use: "when I stop my finger there's lingering
+        // deceleration, it should just stop". A brief pause fell into the gap
+        // between the release window and the liftoff frames, so the scroll
+        // still flung from the speed before the pause.
+        TestRunner.test("a brief pause before lifting cancels momentum") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+
+            // Fast drag: 10mm per frame.
+            var y = 0.0
+            for i in 0...6 {
+                _ = step(tracker, recognizer,
+                         [contact(0, 10, y), contact(1, 30, y)], at: i * 1000)
+                y += 10
+            }
+            // Stop dead for ~80ms (8 frames at 10ms), still touching.
+            for i in 7...14 {
+                _ = step(tracker, recognizer,
+                         [contact(0, 10, y), contact(1, 30, y)], at: i * 100 + 6000)
+            }
+            let update = try require(step(tracker, recognizer, [], at: 8000))
+            check(update.phase == .ended, "expected ended")
+            check(abs(update.velocity.y) < 1,
+                  "a deliberate stop must kill momentum, got \(update.velocity.y) mm/s")
+        }
+
         TestRunner.test("a second scroll can start after the first ends") {
             let tracker = makeTracker(), recognizer = ScrollRecognizer()
             _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
