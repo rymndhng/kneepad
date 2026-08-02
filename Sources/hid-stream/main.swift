@@ -10,6 +10,7 @@ func printUsage() {
 
     USAGE
       hid-stream                 unlock and stream decoded contacts
+      hid-stream --trace         CSV of raw positions, for drift analysis
       hid-stream --raw           also dump every report as hex
       hid-stream --log           one line per report instead of a live view
       hid-stream --seize         open exclusively (if macOS competes for reports)
@@ -23,6 +24,7 @@ func printUsage() {
 let args = Array(CommandLine.arguments.dropFirst())
 if args.contains("--help") || args.contains("-h") { printUsage(); exit(0) }
 let showRaw = args.contains("--raw")
+let trace = args.contains("--trace")
 let logMode = args.contains("--log")
 let seize = args.contains("--seize")
 let restoreOnly = args.contains("--restore")
@@ -147,6 +149,19 @@ session.onFraming = { framing, reportID, length, expected in
 
 session.onFrame = { frame, body in
     reportCount += 1
+
+    if trace {
+        // Straight from the report: no tracking, no smoothing, nothing of ours
+        // between the hardware and this line.
+        if let c = frame.contacts.first {
+            print(String(format: "%d,%d,%d,%.3f,%.3f,%d",
+                         frame.scanTime ?? 0, c.rawX, c.rawY,
+                         c.position.x, c.position.y, frame.contacts.count))
+        } else {
+            print("\(frame.scanTime ?? 0),,,,,0")
+        }
+        return
+    }
     seenReportIDs[layout.reportID, default: 0] += 1
     if showRaw { print("rpt \(layout.reportID)  \(hexDump(body))") }
     render(frame)
