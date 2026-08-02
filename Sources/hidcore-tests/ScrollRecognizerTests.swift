@@ -25,7 +25,7 @@ private func frame(_ contacts: [Contact], at scanTime: Int) -> Frame {
 private func step(_ tracker: ContactTracker, _ recognizer: ScrollRecognizer,
                   _ contacts: [Contact], at scanTime: Int) -> ScrollUpdate? {
     tracker.update(frame(contacts, at: scanTime))
-    return recognizer.update(tracks: tracker.active)
+    return recognizer.update(tracks: tracker.active, dt: tracker.lastDelta)
 }
 
 func runScrollRecognizerTests() {
@@ -117,6 +117,44 @@ func runScrollRecognizerTests() {
             check(update.phase == .began, "expected began")
             expectClose(update.delta.x, 8, 0.001)
             expectClose(update.delta.y, 0, 0.001)
+        }
+
+        // A fast release is the case that broke in practice: the final frames
+        // before liftoff show a spurious slowdown, so sampling velocity at the
+        // instant of lift turned a flick into no momentum at all.
+        TestRunner.test("release velocity ignores the liftoff slowdown") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+
+            // Steady fast drag: 10mm per 0.1s = 100 mm/s.
+            var y = 0.0
+            for i in 0...6 {
+                _ = step(tracker, recognizer,
+                         [contact(0, 10, y), contact(1, 30, y)], at: i * 1000)
+                y += 10
+            }
+            // Liftoff: the last two frames barely move as contact area shrinks.
+            _ = step(tracker, recognizer, [contact(0, 10, y), contact(1, 30, y)], at: 7000)
+            _ = step(tracker, recognizer,
+                     [contact(0, 10, y + 0.1), contact(1, 30, y + 0.1)], at: 8000)
+
+            let update = try require(step(tracker, recognizer, [], at: 9000))
+            check(update.phase == .ended, "expected ended")
+            check(update.velocity.y > 20,
+                  "flick velocity must survive liftoff, got \(update.velocity.y) mm/s")
+        }
+
+        TestRunner.test("a stalled drag still ends with low velocity") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 0), contact(1, 30, 0)], at: 0)
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 1000)
+            // Then hold still for a while before lifting — no flick intended.
+            for i in 2...8 {
+                _ = step(tracker, recognizer,
+                         [contact(0, 10, 10), contact(1, 30, 10)], at: i * 1000)
+            }
+            let update = try require(step(tracker, recognizer, [], at: 9000))
+            check(abs(update.velocity.y) < 5,
+                  "a deliberate stop must not fling, got \(update.velocity.y) mm/s")
         }
 
         TestRunner.test("a second scroll can start after the first ends") {

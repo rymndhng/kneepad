@@ -126,6 +126,7 @@ sigintSource.resume()
 
 var lastWall = Date()
 var scrollCount = 0
+var previousContactCount = 0
 
 session.onFraming = { _, _, _, _ in
     print("\nReady. Two fingers to scroll. Ctrl-C to stop and restore the cursor.\n")
@@ -142,12 +143,19 @@ session.onFrame = { frame, _ in
 
     tracker.update(frame, wallClockDelta: wall)
 
-    // A new touch should stop coasting, the way a real trackpad does.
-    if frame.contacts.count == 1 && !recognizer.isScrolling {
+    // A genuinely new touch should stop coasting, the way a real trackpad does.
+    //
+    // This must trigger on the 0 → N transition, not merely "some contact is
+    // present". Two fingers never lift on the same frame, so the straggler from
+    // the gesture that just ended would otherwise cancel the momentum it had
+    // only just started — the faster the release, the worse it looked.
+    if previousContactCount == 0 && !frame.contacts.isEmpty {
         synthesizer.cancelMomentum()
     }
+    previousContactCount = frame.contacts.count
 
-    guard let update = recognizer.update(tracks: tracker.active) else { return }
+    guard let update = recognizer.update(tracks: tracker.active, dt: tracker.lastDelta)
+    else { return }
 
     if !dryRun { synthesizer.handle(update) }
 
