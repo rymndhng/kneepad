@@ -225,8 +225,25 @@ Design notes:
 **Needs two permissions**: Input Monitoring (to read) *and* Accessibility (to
 post). Without Accessibility, `CGEventPost` silently does nothing.
 
-Still unvalidated by hand: direction, gain, and momentum feel. Flags exist for
-all three (`--reverse`, `--gain`, `--friction`, `--no-momentum`).
+**Tuned on hardware:** `gain 32` px/mm and `friction 0.96` are now the
+defaults — both hand-tuned on the real pad. The initial guess of gain 8 was
+4× too low.
+
+Momentum threshold is expressed in **mm/s**, not px/s, so it stays a statement
+about how fast the finger moved rather than silently getting more sensitive
+whenever gain goes up.
+
+Two bugs found by using it, both only visible on a fast release:
+
+- **Momentum cancelled by its own gesture.** "A new touch stops coasting" was
+  checking "a contact exists and the recognizer is idle", but two fingers never
+  lift on the same frame — the `2 → 1 → 0` straggler satisfied it one frame
+  after momentum started. Now keyed to the `0 → N` transition.
+- **Release velocity measured across liftoff.** Contact area shrinks as fingers
+  leave, so the final frames show a fake slowdown and a hard flick seeded almost
+  no momentum. Now a finite difference over a 50 ms window ending two frames
+  before the lift. The first fix (median of smoothed velocity) overcorrected and
+  made a deliberate stop fling — caught by a test, not by hand.
 
 ### Stage 5 — Pinch / rotate / swipe
 macOS has **no public API** to synthesize these. The working technique is

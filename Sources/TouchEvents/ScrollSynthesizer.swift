@@ -13,14 +13,19 @@ public final class ScrollSynthesizer {
 
     public struct Configuration {
         /// Screen pixels emitted per millimetre of finger travel.
-        public var gain = 8.0
+        /// Tuned by hand on the 55mm ZSA pad.
+        public var gain = 32.0
         /// Natural scrolling: content follows the fingers.
         public var naturalDirection = true
         public var invertHorizontal = false
-        /// Momentum below this speed (px/s) is not worth animating.
-        public var momentumThreshold = 60.0
-        /// Per-tick velocity retention. Lower stops sooner.
-        public var friction = 0.94
+        /// Release speed below which momentum isn't worth animating.
+        ///
+        /// Expressed in **mm/s** rather than px/s so it stays a statement about
+        /// how fast the finger moved, independent of `gain`. Otherwise raising
+        /// gain silently makes momentum trigger on ever-slower releases.
+        public var momentumThreshold = 2.0
+        /// Per-tick velocity retention. Lower stops sooner. Tuned by hand.
+        public var friction = 0.96
         /// Momentum animation rate.
         public var momentumHz = 90.0
         public var momentumEnabled = true
@@ -87,8 +92,13 @@ public final class ScrollSynthesizer {
 
     // MARK: Momentum
 
+    /// The mm/s threshold converted into the px/s space momentum decays in.
+    private var momentumFloor: Double {
+        configuration.momentumThreshold * configuration.gain
+    }
+
     private func startMomentum(velocity: Point) {
-        guard velocity.magnitude >= configuration.momentumThreshold else {
+        guard velocity.magnitude >= momentumFloor else {
             post(delta: Point(x: 0, y: 0), phase: nil, momentum: .end)
             return
         }
@@ -107,7 +117,7 @@ public final class ScrollSynthesizer {
         momentumVelocity = Point(x: momentumVelocity.x * configuration.friction,
                                  y: momentumVelocity.y * configuration.friction)
 
-        if momentumVelocity.magnitude < configuration.momentumThreshold {
+        if momentumVelocity.magnitude < momentumFloor {
             cancelMomentum()
             post(delta: Point(x: 0, y: 0), phase: nil, momentum: .end)
             return

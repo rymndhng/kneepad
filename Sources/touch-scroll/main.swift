@@ -16,11 +16,12 @@ func printUsage() {
 
     USAGE
       touch-scroll                  scroll using the ZSA trackpad
-      touch-scroll --gain N         pixels per millimetre (default 8)
+      touch-scroll --gain N         pixels per millimetre (default 32)
       touch-scroll --reverse        invert vertical direction
       touch-scroll --invert-x       invert horizontal direction
       touch-scroll --no-momentum    disable inertial scrolling
-      touch-scroll --friction N     momentum decay per tick (default 0.94)
+      touch-scroll --friction N     momentum decay per tick (default 0.96)
+      touch-scroll --flick N        mm/s release speed to start momentum (default 2)
       touch-scroll --activation N   mm of travel before scrolling starts
       touch-scroll --quiet          no per-event logging
       touch-scroll --dry-run        recognise but post nothing
@@ -44,6 +45,7 @@ let dryRun = args.contains("--dry-run")
 var config = ScrollSynthesizer.Configuration()
 if let g = value("--gain") { config.gain = g }
 if let f = value("--friction") { config.friction = f }
+if let t = value("--flick") { config.momentumThreshold = t }
 if args.contains("--reverse") { config.naturalDirection = false }
 if args.contains("--invert-x") { config.invertHorizontal = true }
 if args.contains("--no-momentum") { config.momentumEnabled = false }
