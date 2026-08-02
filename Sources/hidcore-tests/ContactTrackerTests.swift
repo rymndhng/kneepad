@@ -8,7 +8,10 @@ private let modulus = 65536      // PTP Scan Time is a 16-bit counter
 private let tick = 0.0001        // 100 µs per count
 
 private func makeTracker() -> ContactTracker {
-    ContactTracker(scanTimeModulus: modulus, secondsPerCount: tick)
+    let tracker = ContactTracker(scanTimeModulus: modulus, secondsPerCount: tick)
+    // These tests assert exact positions; smoothing is covered separately.
+    tracker.smoothing.enabled = false
+    return tracker
 }
 
 private func contact(_ id: Int, _ x: Double, _ y: Double, confident: Bool = true) -> Contact {

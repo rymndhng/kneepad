@@ -78,6 +78,11 @@ public final class ContactTracker {
     private var nextID = 0
     private var lastScanTime: Int?
 
+    /// Position smoothing. Raw capacitive positions jitter by a unit or two
+    /// even under a still finger, which reads as a twitchy cursor.
+    public var smoothing = SmoothingConfiguration()
+    private var filters: [Int: OneEuroPointFilter] = [:]
+
     private let scanTimeModulus: Int?
     private let secondsPerCount: Double?
 
@@ -123,7 +128,8 @@ public final class ContactTracker {
         var events: [TouchEvent] = []
         var seen = Set<Int>()
 
-        for contact in frame.contacts {
+        for raw in frame.contacts {
+            let contact = smooth(raw, dt: dt)
             seen.insert(contact.hardwareID)
             if var existing = tracks[contact.hardwareID] {
                 existing.advance(to: contact, dt: dt)
@@ -146,12 +152,37 @@ public final class ContactTracker {
         }
         for id in vanished {
             if let track = tracks.removeValue(forKey: id) { events.append(.ended(track)) }
+            // A recycled contact ID must not inherit the old finger's filter
+            // state, or the new touch starts by sliding in from the old spot.
+            filters.removeValue(forKey: id)
         }
         return events
     }
 
+    /// Apply per-contact position smoothing. Each contact keeps its own filter
+    /// so two fingers don't pollute each other's estimates.
+    private func smooth(_ contact: Contact, dt: Double) -> Contact {
+        guard smoothing.enabled, dt > 0 else { return contact }
+
+        let filter: OneEuroPointFilter
+        if let existing = filters[contact.hardwareID] {
+            filter = existing
+        } else {
+            filter = OneEuroPointFilter(minCutoff: smoothing.minCutoff, beta: smoothing.beta)
+            filters[contact.hardwareID] = filter
+        }
+        filter.minCutoff = smoothing.minCutoff
+        filter.beta = smoothing.beta
+
+        return Contact(hardwareID: contact.hardwareID,
+                       rawX: contact.rawX, rawY: contact.rawY,
+                       position: filter.filter(contact.position, dt: dt),
+                       confident: contact.confident)
+    }
+
     public func reset() {
         tracks.removeAll()
+        filters.removeAll()
         lastScanTime = nil
         lastDelta = 0
     }

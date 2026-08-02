@@ -10,5 +10,6 @@ runDescriptorTests()
 runContactTrackerTests()
 runScrollRecognizerTests()
 runPointerRecognizerTests()
+runSmoothingTests()
 
 exit(TestRunner.summarize())

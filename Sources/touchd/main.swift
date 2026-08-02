@@ -16,13 +16,27 @@ func printUsage() {
       touchd                        run the driver
       touchd --pointer-gain N       cursor px per mm (default 20)
       touchd --scroll-gain N        scroll px per mm (default 32)
-      touchd --friction N           momentum decay per tick (default 0.96)
+      touchd --friction N           per-tick friction (derived from --decay)
       touchd --flick N              mm/s release speed for momentum (default 2)
+      touchd --accel-max N          peak acceleration multiplier (default 3)
+      touchd --accel-curve N        knee sharpness, 1=soft (default 1.8)
+      touchd --accel-ref N          mm/s at the curve midpoint (default 150)
       touchd --no-accel             disable pointer acceleration
+      touchd --decay N              momentum decay time constant (default 0.27s)
       touchd --no-momentum          disable inertial scrolling
       touchd --no-tap               disable tap-to-click
       touchd --reverse              invert scroll direction
+
+    SMOOTHING (1€ filter over contact positions)
+      touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
+      touchd --beta N               speed coupling; higher is snappier (0.25)
+      touchd --no-smoothing         disable filtering entirely
+
+      Jittery cursor when still  → lower --cutoff, or lower --beta
+      Laggy when moving fast     → raise --beta
+
       touchd --verbose              log recognised gestures
+      touchd --stats                report rate and jitter measurements
       touchd --dry-run              recognise but post nothing
 
     Needs Input Monitoring (to read the pad) and Accessibility (to post
@@ -42,16 +56,27 @@ let verbose = args.contains("--verbose")
 let dryRun = args.contains("--dry-run")
 let tapEnabled = !args.contains("--no-tap")
 
+let showStats = args.contains("--stats")
+
 var scrollConfig = ScrollSynthesizer.Configuration()
 if let g = value("--scroll-gain") { scrollConfig.gain = g }
-if let f = value("--friction") { scrollConfig.friction = f }
 if let t = value("--flick") { scrollConfig.momentumThreshold = t }
+if let d = value("--decay") { scrollConfig.momentumDecayTime = d }
+if let f = value("--friction") { scrollConfig.friction = f }   // after momentumHz
 if args.contains("--reverse") { scrollConfig.naturalDirection = false }
 if args.contains("--no-momentum") { scrollConfig.momentumEnabled = false }
 
 var pointerConfig = PointerSynthesizer.Configuration()
 if let g = value("--pointer-gain") { pointerConfig.gain = g }
+if let a = value("--accel-max") { pointerConfig.maxAcceleration = a }
+if let c = value("--accel-curve") { pointerConfig.accelerationCurve = c }
+if let r = value("--accel-ref") { pointerConfig.accelerationReference = r }
 if args.contains("--no-accel") { pointerConfig.accelerationEnabled = false }
+
+var smoothing = SmoothingConfiguration()
+if let c = value("--cutoff") { smoothing.minCutoff = c }
+if let b = value("--beta") { smoothing.beta = b }
+if args.contains("--no-smoothing") { smoothing.enabled = false }
 
 // MARK: - Permissions
 
@@ -84,11 +109,18 @@ if let size = session.layout.surfaceSize {
 }
 print(String(format: "Pointer       %.0f px/mm%@",
              pointerConfig.gain,
-             pointerConfig.accelerationEnabled ? " with acceleration" : ""))
-print(String(format: "Scroll        %.0f px/mm, %@, friction %.2f",
+             pointerConfig.accelerationEnabled
+                 ? String(format: ", accel ×%.1f knee %.1f",
+                          pointerConfig.maxAcceleration, pointerConfig.accelerationCurve)
+                 : ", no acceleration"))
+print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
              scrollConfig.gain,
              scrollConfig.naturalDirection ? "natural" : "reversed",
-             scrollConfig.friction))
+             scrollConfig.momentumDecayTime))
+print(smoothing.enabled
+      ? String(format: "Smoothing     1€ filter, cutoff %.2f Hz, beta %.3f",
+               smoothing.minCutoff, smoothing.beta)
+      : "Smoothing     off")
 print("Tap to click  \(tapEnabled ? "on" : "off")")
 if dryRun { print("Dry run       recognising only, posting nothing") }
 print()
@@ -117,6 +149,7 @@ do {
 // MARK: - Pipeline
 
 let tracker = ContactTracker(layout: session.layout)
+tracker.smoothing = smoothing
 let scrollRecognizer = ScrollRecognizer()
 let pointerRecognizer = PointerRecognizer()
 pointerRecognizer.twoFingerTapEnabled = tapEnabled
@@ -152,6 +185,57 @@ var previousContactCount = 0
 var taps = 0
 var scrolls = 0
 
+/// Measurements for --stats. Report rate caps how smooth anything can be, and
+/// stationary jitter is what the 1€ filter has to suppress.
+struct FeelStats {
+    var intervals: [Double] = []
+    /// Raw positions captured while a single finger was essentially still.
+    var stillRaw: [Point] = []
+    var stillFiltered: [Point] = []
+
+    mutating func record(interval: Double) {
+        guard interval > 0, interval < 1 else { return }
+        intervals.append(interval)
+        if intervals.count > 4000 { intervals.removeFirst() }
+    }
+
+    static func spread(_ points: [Point]) -> Double {
+        guard points.count > 2 else { return 0 }
+        let n = Double(points.count)
+        let mx = points.reduce(0.0) { $0 + $1.x } / n
+        let my = points.reduce(0.0) { $0 + $1.y } / n
+        let variance = points.reduce(0.0) {
+            $0 + ($1.x - mx) * ($1.x - mx) + ($1.y - my) * ($1.y - my)
+        } / n
+        return variance.squareRoot()
+    }
+
+    func report() {
+        guard !intervals.isEmpty else { print("\nNo reports measured."); return }
+        let sorted = intervals.sorted()
+        let mean = intervals.reduce(0, +) / Double(intervals.count)
+        let median = sorted[sorted.count / 2]
+        let p99 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.99))]
+
+        print("\n── feel measurements ───────────────────────────────")
+        print(String(format: "  report rate    %.0f Hz mean, %.0f Hz median",
+                     1 / mean, 1 / median))
+        print(String(format: "  worst gap      %.1f ms (p99)  — spikes read as stutter",
+                     p99 * 1000))
+        print(String(format: "  jitter raw     %.4f mm", FeelStats.spread(stillRaw)))
+        print(String(format: "  jitter filtered %.4f mm  (%d samples while still)",
+                     FeelStats.spread(stillFiltered), stillFiltered.count))
+        if !stillRaw.isEmpty && !stillFiltered.isEmpty {
+            let before = FeelStats.spread(stillRaw)
+            let after = FeelStats.spread(stillFiltered)
+            if before > 0 {
+                print(String(format: "  noise removed  %.0f%%", (1 - after / before) * 100))
+            }
+        }
+    }
+}
+var stats = FeelStats()
+
 session.onFraming = { _, _, _, _ in
     print("\nReady. One finger moves, tap clicks, two fingers scroll.")
     print("Ctrl-C to stop and restore mouse mode.\n")
@@ -170,11 +254,34 @@ session.onFrame = { frame, _ in
     let dt = tracker.lastDelta
     let tracks = tracker.active
 
+    if showStats {
+        stats.record(interval: dt)
+        // Sample jitter only when one finger is down and barely moving, which
+        // is the condition the filter is meant to clean up.
+        if let raw = frame.contacts.first, frame.contacts.count == 1,
+           let filtered = tracks.first, filtered.velocity.magnitude < 2.0 {
+            // Both in millimetres — frame.contacts is pre-smoothing, the track
+            // is post-smoothing, so this compares like with like.
+            stats.stillRaw.append(raw.position)
+            stats.stillFiltered.append(filtered.position)
+            if stats.stillRaw.count > 2000 {
+                stats.stillRaw.removeFirst()
+                stats.stillFiltered.removeFirst()
+            }
+        }
+    }
+
     // A genuinely new touch stops coasting. Keyed to the 0 → N transition:
     // two fingers never lift on the same frame, so "any contact present" would
     // let the straggler cancel the momentum it just started.
     if previousContactCount == 0 && !frame.contacts.isEmpty {
         scrollSynthesizer.cancelMomentum()
+    }
+    // With no fingers down, drop our cursor belief so the next touch picks up
+    // wherever the pointer actually is — it may have been moved by something
+    // else in the meantime.
+    if frame.contacts.isEmpty && previousContactCount != 0 {
+        pointerSynthesizer.resync()
     }
     previousContactCount = frame.contacts.count
 
@@ -210,6 +317,7 @@ session.onFrame = { frame, _ in
 session.start()
 
 atexit {
+    if showStats { stats.report() }
     if taps > 0 || scrolls > 0 { print("\(taps) taps, \(scrolls) scrolls") }
     if tracker.idChurnDetected {
         print("⚠️  hardware contact IDs were unstable during this run")

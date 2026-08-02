@@ -24,11 +24,27 @@ public final class ScrollSynthesizer {
         /// how fast the finger moved, independent of `gain`. Otherwise raising
         /// gain silently makes momentum trigger on ever-slower releases.
         public var momentumThreshold = 2.0
-        /// Per-tick velocity retention. Lower stops sooner. Tuned by hand.
-        public var friction = 0.96
-        /// Momentum animation rate.
-        public var momentumHz = 90.0
+        /// Seconds for momentum velocity to decay to 1/e.
+        ///
+        /// Expressed as a time constant rather than per-tick friction so the
+        /// feel is independent of `momentumHz`. Per-tick decay silently
+        /// changes the glide whenever the tick rate changes, which is
+        /// physically wrong. 0.27s reproduces the hand-tuned 0.96-at-90Hz.
+        public var momentumDecayTime = 0.27
+        /// Momentum animation rate. Higher is smoother; 120 matches a
+        /// ProMotion display's refresh.
+        public var momentumHz = 120.0
         public var momentumEnabled = true
+
+        /// Per-tick friction, kept as a convenience for tuning. Reading it
+        /// derives from the time constant and the current tick rate.
+        public var friction: Double {
+            get { exp(-1.0 / (momentumHz * momentumDecayTime)) }
+            set {
+                guard newValue > 0, newValue < 1 else { return }
+                momentumDecayTime = -1.0 / (momentumHz * log(newValue))
+            }
+        }
 
         public init() {}
     }
@@ -114,8 +130,10 @@ public final class ScrollSynthesizer {
     }
 
     private func stepMomentum(_ dt: Double) {
-        momentumVelocity = Point(x: momentumVelocity.x * configuration.friction,
-                                 y: momentumVelocity.y * configuration.friction)
+        // Time-based decay, so the glide is identical whatever the tick rate.
+        let decay = exp(-dt / configuration.momentumDecayTime)
+        momentumVelocity = Point(x: momentumVelocity.x * decay,
+                                 y: momentumVelocity.y * decay)
 
         if momentumVelocity.magnitude < momentumFloor {
             cancelMomentum()
@@ -155,6 +173,12 @@ public final class ScrollSynthesizer {
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(dy))
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(dx))
+
+        // The fixed-point fields carry sub-pixel precision. Apps that read them
+        // (AppKit scroll views among them) get genuinely smooth motion instead
+        // of the integer staircase the point deltas alone describe.
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: wanted.y)
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: wanted.x)
 
         if let phase {
             event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase.rawValue)

@@ -15,6 +15,10 @@ public final class PointerSynthesizer {
         public var maxAcceleration = 3.0
         /// Finger speed (mm/s) at which acceleration reaches its midpoint.
         public var accelerationReference = 150.0
+        /// Sharpness of the acceleration knee. 1.0 is a soft, gradual ramp;
+        /// higher keeps slow movement near 1:1 for precision and then climbs
+        /// quickly, which is the shape Apple's curve has.
+        public var accelerationCurve = 1.8
         public var accelerationEnabled = true
 
         public init() {}
@@ -23,8 +27,18 @@ public final class PointerSynthesizer {
     public var configuration: Configuration
 
     private var buttonState: [MouseButton: Bool] = [:]
-    /// Sub-pixel remainder, so slow movement isn't truncated away.
-    private var residual = Point(x: 0, y: 0)
+
+    /// Our own cursor position, kept in full precision.
+    ///
+    /// Reading the system cursor back every frame both costs a round trip and
+    /// quantises to whole pixels, so sub-pixel movement was being thrown away
+    /// each frame instead of accumulating. Tracking it ourselves is what makes
+    /// slow movement smooth rather than steppy.
+    private var cursor: CGPoint?
+
+    /// Beyond this much disagreement with the system cursor, assume something
+    /// else moved it (another device, a window server warp) and resync.
+    private let resyncThreshold: CGFloat = 3.0
 
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
@@ -51,6 +65,9 @@ public final class PointerSynthesizer {
         }
     }
 
+    /// Forget our cursor belief, e.g. when all fingers lift.
+    public func resync() { cursor = nil }
+
     // MARK: Motion
 
     private var anyButtonDown: MouseButton? {
@@ -62,20 +79,31 @@ public final class PointerSynthesizer {
         if configuration.accelerationEnabled, dt > 0 {
             let speed = millimetres.magnitude / dt          // mm/s
             let ratio = speed / configuration.accelerationReference
-            // Saturating curve: 1 at rest, approaching maxAcceleration when fast.
-            let factor = 1 + (configuration.maxAcceleration - 1) * (ratio / (1 + ratio))
+            // Raising the ratio to a power puts a knee in the curve: slow
+            // movement stays near unity gain for precision, then gain climbs
+            // steeply. A plain r/(1+r) ramp has no knee and feels mushy.
+            let shaped = pow(ratio, configuration.accelerationCurve)
+            let factor = 1 + (configuration.maxAcceleration - 1) * (shaped / (1 + shaped))
             scale *= factor
         }
 
-        let wanted = Point(x: millimetres.x * scale + residual.x,
-                           y: millimetres.y * scale + residual.y)
-        let dx = wanted.x.rounded(.towardZero)
-        let dy = wanted.y.rounded(.towardZero)
-        residual = Point(x: wanted.x - dx, y: wanted.y - dy)
-        guard dx != 0 || dy != 0 else { return }
+        // Track the cursor in full precision, resyncing only if something else
+        // moved it. This is what preserves sub-pixel motion between frames.
+        let system = CGEvent(source: nil)?.location ?? .zero
+        var origin = cursor ?? system
+        if abs(origin.x - system.x) > resyncThreshold
+            || abs(origin.y - system.y) > resyncThreshold {
+            origin = system
+        }
 
-        let current = CGEvent(source: nil)?.location ?? .zero
-        let target = clamp(CGPoint(x: current.x + dx, y: current.y + dy))
+        let target = clamp(CGPoint(x: origin.x + millimetres.x * scale,
+                                   y: origin.y + millimetres.y * scale))
+        cursor = target
+
+        // Integer deltas for apps that read relative motion; the position
+        // itself stays fractional.
+        let dx = (target.x - origin.x).rounded()
+        let dy = (target.y - origin.y).rounded()
 
         // Dragging is a distinct event type; sending mouseMoved while a button
         // is held would break text selection and window dragging.

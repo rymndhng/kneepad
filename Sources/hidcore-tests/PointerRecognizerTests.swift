@@ -10,7 +10,10 @@ private let tick = 0.0001
 private let frameCounts = 100
 
 private func makeTracker() -> ContactTracker {
-    ContactTracker(scanTimeModulus: modulus, secondsPerCount: tick)
+    let tracker = ContactTracker(scanTimeModulus: modulus, secondsPerCount: tick)
+    // These tests assert exact positions; smoothing is covered separately.
+    tracker.smoothing.enabled = false
+    return tracker
 }
 
 private func contact(_ id: Int, _ x: Double, _ y: Double, confident: Bool = true) -> Contact {
