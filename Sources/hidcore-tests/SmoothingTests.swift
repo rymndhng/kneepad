@@ -125,6 +125,82 @@ func runSmoothingTests() {
             expectClose(filter.filter(7.0, dt: 0), 7.0, 0.001)
         }
 
+        // MARK: Lead compensation
+        //
+        // The trackpad firmware runs its own IIR low-pass. Measured from
+        // hid-stream --trace: after a fast swipe, per-frame deltas decay by a
+        // near-constant ~0.72 for ~85ms, which is a filter, not a finger.
+
+        /// Model of the firmware: y[n] = a·x[n] + (1-a)·y[n-1].
+        func firmwareSmoothed(_ truth: [Double], a: Double) -> [Double] {
+            var y: Double? = nil
+            return truth.map { x in
+                let out = y.map { a * x + (1 - a) * $0 } ?? x
+                y = out
+                return out
+            }
+        }
+
+        /// The compensator: x[n] = y[n] + k·(y[n] - y[n-1]).
+        func leadCompensated(_ input: [Double], gain: Double) -> [Double] {
+            var previous: Double? = nil
+            return input.map { y in
+                let out = previous.map { y + gain * (y - $0) } ?? y
+                previous = y
+                return out
+            }
+        }
+
+        TestRunner.test("lead compensation cancels the firmware's tail") {
+            // Finger moves at a constant rate then stops dead.
+            var truth: [Double] = []
+            var x = 0.0
+            for _ in 0..<25 { x += 2.0; truth.append(x) }
+            for _ in 0..<25 { truth.append(x) }
+
+            let a = 0.28
+            let observed = firmwareSmoothed(truth, a: a)
+            let restored = leadCompensated(observed, gain: (1 - a) / a)
+
+            // Uncompensated, motion keeps arriving long after the stop.
+            let tailBefore = zip(observed.dropFirst(26), observed.dropFirst(25))
+                .reduce(0.0) { $0 + abs($1.0 - $1.1) }
+            let tailAfter = zip(restored.dropFirst(26), restored.dropFirst(25))
+                .reduce(0.0) { $0 + abs($1.0 - $1.1) }
+
+            check(tailAfter < tailBefore * 0.05,
+                  "tail should be all but gone: \(tailBefore) → \(tailAfter)")
+        }
+
+        TestRunner.test("lead compensation preserves total displacement") {
+            var truth: [Double] = []
+            var x = 0.0
+            for _ in 0..<25 { x += 2.0; truth.append(x) }
+            for _ in 0..<25 { truth.append(x) }
+
+            let a = 0.28
+            let restored = leadCompensated(firmwareSmoothed(truth, a: a), gain: (1 - a) / a)
+
+            // It redistributes motion earlier in time; it must not invent or
+            // lose any, or the cursor would drift relative to the finger.
+            expectClose(restored.last ?? 0, truth.last ?? 0, 0.01,
+                        "final position must match the finger")
+        }
+
+        TestRunner.test("lead compensation is disabled by a zero gain") {
+            let tracker = ContactTracker(scanTimeModulus: 65536, secondsPerCount: 0.0001)
+            tracker.smoothing.leadGain = 0
+            tracker.smoothing.enabled = false
+
+            tracker.update(Frame(contacts: [Contact(hardwareID: 0, rawX: 0, rawY: 0,
+                                                    position: Point(x: 10, y: 10))],
+                                 scanTime: 0))
+            tracker.update(Frame(contacts: [Contact(hardwareID: 0, rawX: 0, rawY: 0,
+                                                    position: Point(x: 12, y: 10))],
+                                 scanTime: 100))
+            expectClose(tracker.active[0].position.x, 12, 0.001)
+        }
+
         // MARK: Integration with the tracker
 
         TestRunner.test("tracker smoothing can be disabled") {

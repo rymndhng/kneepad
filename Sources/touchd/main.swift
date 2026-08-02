@@ -30,13 +30,15 @@ func printUsage() {
     SMOOTHING (1€ filter over contact positions)
       touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
       touchd --beta N               speed coupling; higher is snappier (0.25)
+      touchd --lead N               cancel firmware smoothing (default 2.5, 0=off)
       touchd --settle N             how hard a stop is snapped to (default 4)
       touchd --deadband N           mm treated as noise, not lag (default 0.25)
       touchd --no-smoothing         disable filtering entirely
 
       Jittery cursor when still  → lower --cutoff, or lower --beta
       Laggy when moving fast     → raise --beta
-      Drifts on after you stop   → raise --settle, or lower --deadband
+      Drifts on after you stop   → raise --lead (firmware smoothing)
+      Overshoots / feels jumpy   → lower --lead
 
       touchd --verbose              log recognised gestures
       touchd --stats                report rate and jitter measurements
@@ -79,6 +81,7 @@ if args.contains("--no-accel") { pointerConfig.accelerationEnabled = false }
 var smoothing = SmoothingConfiguration()
 if let c = value("--cutoff") { smoothing.minCutoff = c }
 if let b = value("--beta") { smoothing.beta = b }
+if let l = value("--lead") { smoothing.leadGain = l }
 if let g = value("--settle") { smoothing.settleGain = g }
 if let d = value("--deadband") { smoothing.settleDeadband = d }
 if args.contains("--no-smoothing") { smoothing.enabled = false }
@@ -123,8 +126,8 @@ print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
              scrollConfig.naturalDirection ? "natural" : "reversed",
              scrollConfig.momentumDecayTime))
 print(smoothing.enabled
-      ? String(format: "Smoothing     1€ filter, cutoff %.2f Hz, beta %.3f, settle %.1f",
-               smoothing.minCutoff, smoothing.beta, smoothing.settleGain)
+      ? String(format: "Smoothing     1€ filter cutoff %.2f Hz beta %.3f, lead %.1f",
+               smoothing.minCutoff, smoothing.beta, smoothing.leadGain)
       : "Smoothing     off")
 print("Tap to click  \(tapEnabled ? "on" : "off")")
 if dryRun { print("Dry run       recognising only, posting nothing") }

@@ -141,6 +141,22 @@ public final class OneEuroPointFilter {
 /// Tuning for contact position smoothing.
 public struct SmoothingConfiguration {
     public var enabled = true
+
+    /// Cancels the smoothing the trackpad firmware applies before we see the
+    /// data — the cause of the deceleration tail after the finger stops.
+    ///
+    /// Measured from `hid-stream --trace` on a fast swipe: per-frame deltas
+    /// decay by a near-constant ~0.72 each frame over roughly 85ms, which is
+    /// an IIR low-pass `y[n] = a·x[n] + (1-a)·y[n-1]` with a ≈ 0.28, not a
+    /// finger decelerating. Its exact inverse is
+    ///
+    ///     x[n] = y[n] + ((1-a)/a)·(y[n] - y[n-1])
+    ///
+    /// so `leadGain` is (1-a)/a ≈ 2.5. Total displacement is preserved — the
+    /// motion is just delivered when it happened instead of trailing after.
+    ///
+    /// Set to 0 to disable. Too high overshoots and feels jumpy.
+    public var leadGain = 2.5
     /// Hz. Lower is steadier at rest; too low and slow movement feels sticky.
     public var minCutoff = 1.2
     /// Speed coupling. Higher responds faster but passes more jitter.
