@@ -334,3 +334,37 @@ Not done: code signing and notarization. Only needed if this is ever shared.
 - Apple — `IOHIDManager` / `IOKit/hid` headers; `CGEvent` / `CGEventSource`
 - Mac Mouse Fix (GPL-3) — undocumented gesture CGEvent constants
 - QMK — pointing device / digitizer feature, for any firmware-side changes
+
+---
+
+## Stage 5 field notes (in progress)
+
+Captured from a Magic Trackpad via `gesture-probe`. **Partial — do not build on
+this yet.**
+
+Confirmed:
+
+| Field | Meaning | Evidence |
+|---|---|---|
+| 132 | Phase, matching `NSEventPhase` | 128 = `.mayBegin`, 8 = `.ended` observed |
+| 110 | Gesture type — likely `IOHIDEventType` | value 6 seen (`Scroll`?) — unconfirmed |
+| 115, 117, 164 | Float32 bit pattern of value A | `0x3FD29000` = 1.6446 = double at 113/114/116/118 |
+| 123, 165 | Float32 bit pattern of value B | matches double at 119/139 |
+| 113, 114, 116, 118 | Value A as double | 1.644775 |
+| 119, 139 | Value B as double | −0.132965 |
+
+`0x80000000` (−0.0) is the **"no value" sentinel** — it fills every value field
+on a `.mayBegin` event.
+
+Housekeeping, identical on every event, not gesture data:
+39, 40, 41, 45, 50, 55, 58, 85, 87, 101, 169.
+
+Open questions:
+
+- **Only type 29 appeared at `.cghidEventTap`.** No Magnify (30), Rotate (18)
+  or Swipe (31). Hypothesis: those are synthesised above the HID tap, so the
+  probe now defaults to `.cgSessionEventTap`.
+- Which gesture produced the captured values is unknown — the first run mixed
+  several. Runs must be one gesture at a time, hence `--label`.
+- `.began` (1) and `.changed` (4) phases were never captured, so the
+  mid-gesture payload shape is still unseen.
