@@ -10,8 +10,10 @@ private let tick = 0.0001
 
 private func makeTracker() -> ContactTracker {
     let tracker = ContactTracker(scanTimeModulus: modulus, secondsPerCount: tick)
-    // These tests assert exact positions; smoothing is covered separately.
+    // These tests assert exact positions; smoothing and lead compensation
+    // are independent stages, both covered by their own suite.
     tracker.smoothing.enabled = false
+    tracker.smoothing.leadGain = 0
     return tracker
 }
 

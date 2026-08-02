@@ -165,11 +165,16 @@ public final class ContactTracker {
     /// Apply per-contact position smoothing. Each contact keeps its own filter
     /// so two fingers don't pollute each other's estimates.
     private func smooth(_ contact: Contact, dt: Double) -> Contact {
-        guard smoothing.enabled, dt > 0 else { return contact }
+        guard dt > 0 else { return contact }
 
-        // Undo the firmware's own smoothing first, then remove sensor noise.
-        // Order matters: compensating after filtering would just re-amplify
-        // what the filter had removed.
+        // Two independent stages, deliberately separable.
+        //
+        // Lead compensation cancels the deceleration tail present in the raw
+        // absolute stream; the 1€ filter removes sensor noise. They pull in
+        // opposite directions — lead sharpens the stop, and the filter, whose
+        // cutoff is lowest exactly when the finger is slowing, re-smooths it.
+        // Bundling them behind one switch made it impossible to tell which was
+        // responsible for anything.
         var position = contact.position
         if smoothing.leadGain > 0, let previous = previousRaw[contact.hardwareID] {
             let delta = contact.position - previous
@@ -177,6 +182,12 @@ public final class ContactTracker {
                              y: contact.position.y + smoothing.leadGain * delta.y)
         }
         previousRaw[contact.hardwareID] = contact.position
+
+        guard smoothing.enabled else {
+            return Contact(hardwareID: contact.hardwareID,
+                           rawX: contact.rawX, rawY: contact.rawY,
+                           position: position, confident: contact.confident)
+        }
 
         let filter: OneEuroPointFilter
         if let existing = filters[contact.hardwareID] {

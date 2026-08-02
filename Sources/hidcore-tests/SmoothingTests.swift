@@ -206,6 +206,7 @@ func runSmoothingTests() {
         TestRunner.test("tracker smoothing can be disabled") {
             let tracker = ContactTracker(scanTimeModulus: 65536, secondsPerCount: 0.0001)
             tracker.smoothing.enabled = false
+            tracker.smoothing.leadGain = 0
 
             tracker.update(Frame(contacts: [Contact(hardwareID: 0, rawX: 0, rawY: 0,
                                                     position: Point(x: 10, y: 10))],

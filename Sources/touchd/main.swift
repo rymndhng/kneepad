@@ -36,12 +36,17 @@ func printUsage() {
       touchd --lead N               cancel firmware smoothing (default 1.0, 0=off)
       touchd --settle N             how hard a stop is snapped to (default 4)
       touchd --deadband N           mm treated as noise, not lag (default 0.25)
-      touchd --no-smoothing         disable filtering entirely
+      touchd --no-filter            disable the 1€ filter, keep lead
+      touchd --no-smoothing         disable the 1€ filter (alias)
 
       Jittery cursor when still  → lower --cutoff, or lower --beta
       Laggy when moving fast     → raise --beta
-      Drifts on after you stop   → raise --lead (firmware smoothing)
+      Drifts on after you stop   → raise --lead; the tail is in the raw
+                                   absolute stream, and gain multiplies it
       Overshoots / feels jumpy   → lower --lead
+
+      The stages are independent. To isolate the tail without the filter
+      fighting it:   touchd --minimal --lead 2.5
 
       touchd --verbose              log recognised gestures
       touchd --stats                report rate and jitter measurements
@@ -91,9 +96,12 @@ if minimal {
 
 var smoothing = SmoothingConfiguration()
 if minimal {
-    smoothing.enabled = false     // disables the 1€ filter AND lead compensation
-    smoothing.leadGain = 0
+    smoothing.enabled = false     // 1€ filter off
+    smoothing.leadGain = 0        // lead compensation off
 }
+// Parsed after --minimal so a stage can be added back on its own, e.g.
+//   touchd --minimal --lead 2.5
+if args.contains("--no-filter") { smoothing.enabled = false }
 if let c = value("--cutoff") { smoothing.minCutoff = c }
 if let b = value("--beta") { smoothing.beta = b }
 if let l = value("--lead") { smoothing.leadGain = l }
@@ -137,8 +145,9 @@ func stage(_ name: String, _ on: Bool, _ detail: String) {
         + (on ? detail : "off"))
 }
 print("Pipeline      raw report from device")
-stage("lead compensation",
-      smoothing.enabled && smoothing.leadGain > 0,
+// Independent of the 1€ filter — gating this on smoothing.enabled would
+// misreport the pipeline, which is exactly what this summary exists to prevent.
+stage("lead compensation", smoothing.leadGain > 0,
       String(format: "gain %.1f", smoothing.leadGain))
 stage("1€ filter", smoothing.enabled,
       String(format: "cutoff %.2f Hz, beta %.3f, settle %.1f",
@@ -150,7 +159,10 @@ stage("acceleration", pointerConfig.accelerationEnabled,
 print(String(format: "              → %@%.0f px/mm",
              "gain                ", pointerConfig.gain))
 print("              → CGEventPost")
-if minimal { print("              (--minimal: raw delta × gain only)") }
+if minimal && smoothing.leadGain == 0 && !smoothing.enabled
+    && !pointerConfig.accelerationEnabled {
+    print("              (--minimal: raw delta × gain only)")
+}
 print()
 print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
              scrollConfig.gain,
