@@ -30,6 +30,9 @@ func printUsage() {
     SMOOTHING (1€ filter over contact positions)
       touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
       touchd --beta N               speed coupling; higher is snappier (0.25)
+      touchd --minimal              STRIP EVERYTHING: no filter, no lead, no
+                                    acceleration. Raw delta x gain, nothing else.
+                                    Start here when the feel is wrong.
       touchd --lead N               cancel firmware smoothing (default 1.0, 0=off)
       touchd --settle N             how hard a stop is snapped to (default 4)
       touchd --deadband N           mm treated as noise, not lag (default 0.25)
@@ -78,7 +81,19 @@ if let c = value("--accel-curve") { pointerConfig.accelerationCurve = c }
 if let r = value("--accel-ref") { pointerConfig.accelerationReference = r }
 if args.contains("--no-accel") { pointerConfig.accelerationEnabled = false }
 
+// Strip the pipeline back to raw delta x gain. Every transform below was
+// added to fix a specific symptom, and stacked they are hard to reason about;
+// this is the baseline to build back up from, one stage at a time.
+let minimal = args.contains("--minimal")
+if minimal {
+    pointerConfig.accelerationEnabled = false
+}
+
 var smoothing = SmoothingConfiguration()
+if minimal {
+    smoothing.enabled = false     // disables the 1€ filter AND lead compensation
+    smoothing.leadGain = 0
+}
 if let c = value("--cutoff") { smoothing.minCutoff = c }
 if let b = value("--beta") { smoothing.beta = b }
 if let l = value("--lead") { smoothing.leadGain = l }
@@ -115,20 +130,32 @@ if let size = session.layout.surfaceSize {
     print(String(format: "Surface       %.1f × %.1f mm, %d contacts",
                  size.x, size.y, session.layout.maxContacts))
 }
-print(String(format: "Pointer       %.0f px/mm%@",
-             pointerConfig.gain,
-             pointerConfig.accelerationEnabled
-                 ? String(format: ", accel ×%.1f knee %.1f",
-                          pointerConfig.maxAcceleration, pointerConfig.accelerationCurve)
-                 : ", no acceleration"))
+// Spell out exactly what sits between the hardware and the cursor. Stacked
+// transforms are the main reason the feel became hard to reason about.
+func stage(_ name: String, _ on: Bool, _ detail: String) {
+    print("              \(on ? "→" : "·") \(name.padding(toLength: 20, withPad: " ", startingAt: 0))"
+        + (on ? detail : "off"))
+}
+print("Pipeline      raw report from device")
+stage("lead compensation",
+      smoothing.enabled && smoothing.leadGain > 0,
+      String(format: "gain %.1f", smoothing.leadGain))
+stage("1€ filter", smoothing.enabled,
+      String(format: "cutoff %.2f Hz, beta %.3f, settle %.1f",
+             smoothing.minCutoff, smoothing.beta, smoothing.settleGain))
+stage("acceleration", pointerConfig.accelerationEnabled,
+      String(format: "×%.1f, knee %.1f, ref %.0f mm/s",
+             pointerConfig.maxAcceleration, pointerConfig.accelerationCurve,
+             pointerConfig.accelerationReference))
+print(String(format: "              → %@%.0f px/mm",
+             "gain                ", pointerConfig.gain))
+print("              → CGEventPost")
+if minimal { print("              (--minimal: raw delta × gain only)") }
+print()
 print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
              scrollConfig.gain,
              scrollConfig.naturalDirection ? "natural" : "reversed",
              scrollConfig.momentumDecayTime))
-print(smoothing.enabled
-      ? String(format: "Smoothing     1€ filter cutoff %.2f Hz beta %.3f, lead %.1f",
-               smoothing.minCutoff, smoothing.beta, smoothing.leadGain)
-      : "Smoothing     off")
 print("Tap to click  \(tapEnabled ? "on" : "off")")
 if dryRun { print("Dry run       recognising only, posting nothing") }
 print()

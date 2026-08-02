@@ -25,6 +25,8 @@ let package = Package(
         ),
         // Stage 4 — two-finger scrolling.
         .executableTarget(name: "touch-scroll", dependencies: ["HIDCore", "TouchEvents"]),
+        // Diagnostic: measure what happens after CGEventPost.
+        .executableTarget(name: "pointer-latency", dependencies: []),
         // Stage 5 recon — learn the undocumented gesture CGEvent encoding.
         .executableTarget(name: "gesture-probe", dependencies: ["HIDCore", "TouchEvents"]),
         // Stage 5 — post candidate gesture events and see what responds.
