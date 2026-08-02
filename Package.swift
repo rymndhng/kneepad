@@ -25,6 +25,8 @@ let package = Package(
         ),
         // Stage 4 — two-finger scrolling.
         .executableTarget(name: "touch-scroll", dependencies: ["HIDCore", "TouchEvents"]),
+        // Stages 3 + 4 — the actual driver: pointer, taps and scrolling.
+        .executableTarget(name: "touchd", dependencies: ["HIDCore", "TouchEvents"]),
         // Tests run as a plain executable: this Command Line Tools install has
         // neither a usable XCTest nor a working Testing.framework.
         //   swift run hidcore-tests

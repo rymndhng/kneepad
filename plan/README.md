@@ -193,11 +193,25 @@ usable XCTest nor a working `Testing.framework` (the latter links
 and report decoding are tested against a captured copy of the real Voyager
 descriptor in `VoyagerFixture.swift`.
 
-### Stage 3 — Pointer and click
-In PTP mode the device stops sending Report 6, so we inherit the cursor.
-Relative motion from the primary contact via `CGEventCreateMouseEvent`, plus
-palm/thumb rejection using the Confidence bit and contact ordering. Needs a
-pointer acceleration curve — raw deltas feel awful.
+### Stage 3 — Pointer and click ✅ (built, needs feel-testing)
+`HIDCore/PointerRecognizer.swift` + `TouchEvents/PointerSynthesizer.swift`,
+combined with scrolling in **`touchd`** — the first build that replaces
+everything mouse mode did, so the pad stays usable while it runs.
+
+- One finger moves the cursor; the **primary contact is the oldest one down**,
+  so a second finger landing doesn't yank the pointer.
+- Tap to click (≤0.25 s, ≤2 mm travel), two-finger tap for right click,
+  double-tap pairing by time *and* distance.
+- Physical buttons are edge-detected; drags post `…MouseDragged` rather than
+  `mouseMoved`, or text selection breaks.
+- Saturating acceleration curve — raw deltas feel awful.
+- `releaseAll()` on shutdown so a crash mid-drag can't leave a button stuck
+  down for the rest of the login session.
+
+**Suppression rule that matters:** a touch sequence that *ever* had two fingers
+stays suppressed for the pointer until every finger lifts. Without it the
+straggler ending a scroll drags the cursor across the screen — the same
+one-finger-lifts-first problem that broke momentum.
 
 ### Stage 4 — Scroll ✅ (built, needs feel-testing)
 `HIDCore/ScrollRecognizer.swift` + `TouchEvents/ScrollSynthesizer.swift`,

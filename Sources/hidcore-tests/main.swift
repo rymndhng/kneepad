@@ -9,5 +9,6 @@ import Foundation
 runDescriptorTests()
 runContactTrackerTests()
 runScrollRecognizerTests()
+runPointerRecognizerTests()
 
 exit(TestRunner.summarize())
