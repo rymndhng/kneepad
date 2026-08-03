@@ -7,6 +7,12 @@ public enum ScrollPhase {
 }
 
 public struct ScrollUpdate {
+    public init(phase: ScrollPhase, delta: Point, velocity: Point) {
+        self.phase = phase
+        self.delta = delta
+        self.velocity = velocity
+    }
+
     public let phase: ScrollPhase
     /// Movement since the previous update, in millimetres.
     public let delta: Point

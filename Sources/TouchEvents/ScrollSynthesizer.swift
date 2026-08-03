@@ -108,10 +108,19 @@ public final class ScrollSynthesizer {
     }
 
     /// Stop any in-flight momentum — call when a new touch lands.
+    /// Stops coasting, and tells the receiving app that it has stopped.
+    ///
+    /// The end event is the part that matters. An app that has seen momentum
+    /// begin runs its own animation until it sees momentum end — Maps and any
+    /// AppKit scroll view both do — so simply dropping our timer left the view
+    /// gliding on with nothing driving it. Putting two fingers back down
+    /// looked like it did nothing.
     public func cancelMomentum() {
+        let wasCoasting = momentumTimer != nil
         momentumTimer?.cancel()
         momentumTimer = nil
         momentumVelocity = Point(x: 0, y: 0)
+        if wasCoasting { post(delta: Point(x: 0, y: 0), phase: nil, momentum: .end) }
     }
 
     // MARK: Conversion
@@ -150,8 +159,9 @@ public final class ScrollSynthesizer {
                                  y: momentumVelocity.y * decay)
 
         if momentumVelocity.magnitude < momentumFloor {
+            // cancelMomentum posts the end event; posting one here too would
+            // send it twice.
             cancelMomentum()
-            post(delta: Point(x: 0, y: 0), phase: nil, momentum: .end)
             return
         }
         post(delta: Point(x: momentumVelocity.x * dt, y: momentumVelocity.y * dt),
@@ -160,15 +170,26 @@ public final class ScrollSynthesizer {
 
     // MARK: Event construction
 
-    private enum MomentumPhase: Int64 {
+    public enum MomentumPhase: Int64 {
         case none = 0, begin = 1, `continue` = 2, end = 3
     }
 
-    private enum Phase: Int64 {
+    public enum Phase: Int64 {
         case began = 1, changed = 2, ended = 4
     }
 
+    /// Observes every event this would post. Exists so the phase sequence can
+    /// be tested — the ordering bugs here are invisible from the outside and
+    /// show up as an app that keeps scrolling after you have stopped it.
+    public var onPost: ((Point, Phase?, MomentumPhase) -> Void)?
+
+    /// When false, `onPost` still fires but nothing reaches the window server.
+    public var postsEvents = true
+
     private func post(delta: Point, phase: Phase?, momentum: MomentumPhase) {
+        onPost?(delta, phase, momentum)
+        guard postsEvents else { return }
+
         // Carry sub-pixel remainder so slow drags still move.
         let wanted = Point(x: delta.x + residual.x, y: delta.y + residual.y)
         let dx = wanted.x.rounded(.towardZero)

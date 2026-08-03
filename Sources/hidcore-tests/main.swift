@@ -16,5 +16,6 @@ runCalibrationTests()
 runTuningTests()
 runTelemetryTests()
 runScrollDirectionTests()
+runMomentumPhaseTests()
 
 exit(TestRunner.summarize())

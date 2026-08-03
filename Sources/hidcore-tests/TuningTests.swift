@@ -259,3 +259,73 @@ func runScrollDirectionTests() {
         }
     }
 }
+
+// Momentum phases. An app that has seen momentum begin animates on its own
+// until it sees momentum end, so every begin must be matched — including when
+// the user interrupts a glide by putting fingers back down.
+
+func runMomentumPhaseTests() {
+    TestRunner.suite("Scroll momentum phases") {
+
+        /// A synthesiser that records phases instead of posting events.
+        func recorder() -> (ScrollSynthesizer, () -> [ScrollSynthesizer.MomentumPhase]) {
+            let synth = ScrollSynthesizer()
+            var seen: [ScrollSynthesizer.MomentumPhase] = []
+            synth.postsEvents = false
+            synth.onPost = { _, _, momentum in seen.append(momentum) }
+            return (synth, { seen })
+        }
+
+        /// A release fast enough to coast.
+        func flick() -> ScrollUpdate {
+            ScrollUpdate(phase: .ended, delta: Point(x: 0, y: 0),
+                         velocity: Point(x: 0, y: 400))
+        }
+
+        TestRunner.test("a flick begins momentum") {
+            let (synth, seen) = recorder()
+            synth.handle(flick())
+            check(seen().contains(.begin), "expected a momentum begin, got \(seen())")
+        }
+
+        // The reported symptom: coasting in Maps, two fingers back down, and
+        // the map carried on. Cancelling our timer is not enough — the app is
+        // running its own animation and only stops when told momentum ended.
+        TestRunner.test("interrupting a glide tells the app momentum ended") {
+            let (synth, seen) = recorder()
+            synth.handle(flick())
+            synth.cancelMomentum()
+            check(seen().last == .end,
+                  "expected the sequence to end, got \(seen())")
+        }
+
+        TestRunner.test("every begin is matched by exactly one end") {
+            let (synth, seen) = recorder()
+            synth.handle(flick())
+            synth.cancelMomentum()
+            synth.cancelMomentum()      // idle cancels must stay silent
+            synth.cancelMomentum()
+            let begins = seen().filter { $0 == .begin }.count
+            let ends = seen().filter { $0 == .end }.count
+            expectEqual(begins, 1, "one flick, one begin")
+            expectEqual(ends, 1, "a repeated cancel must not repeat the end")
+        }
+
+        TestRunner.test("cancelling when nothing is coasting posts nothing") {
+            let (synth, seen) = recorder()
+            synth.cancelMomentum()
+            expectEqual(seen().count, 0,
+                        "a new touch with no glide in flight must be silent")
+        }
+
+        TestRunner.test("a slow release does not begin momentum") {
+            let (synth, seen) = recorder()
+            synth.handle(ScrollUpdate(phase: .ended, delta: Point(x: 0, y: 0),
+                                      velocity: Point(x: 0, y: 0.2)))
+            check(!seen().contains(.begin), "a deliberate stop must not coast")
+            synth.cancelMomentum()
+            check(!seen().contains(where: { $0 == .end && seen().first == .begin }),
+                  "and cancelling afterwards must not invent a sequence")
+        }
+    }
+}
