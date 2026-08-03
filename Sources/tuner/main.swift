@@ -29,7 +29,7 @@ final class CurveView: NSView {
     var trail: [Double] = []
 
     private let sMin = 3.0, sMax = 1000.0
-    private let inset = NSEdgeInsets(top: 24, left: 40, bottom: 48, right: 12)
+    private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 48, right: 26)
 
     /// Colour for the live position and its trail.
     ///
@@ -234,11 +234,23 @@ final class CurveView: NSView {
         axis.draw(at: NSPoint(x: inset.left + (w - axis.size().width) / 2,
                               y: inset.top + h + 32))
 
-        // The vertical axis, named above it rather than rotated alongside it.
-        // Rotated text in a flipped view is easy to get subtly wrong, and the
-        // plot has headroom at the top that this costs nothing to use.
-        NSAttributedString(string: "screen px per mm", attributes: label)
-            .draw(at: NSPoint(x: 4, y: 6))
+        // The vertical axis, named down the right-hand edge.
+        //
+        // This view is flipped, so a rotation composes with the flip AppKit
+        // already applies when drawing text upright. Rotating by -90 and
+        // drawing at negative height is what puts the glyphs the right way up
+        // reading bottom to top — checked by rendering a glyph both ways and
+        // comparing against a pixel rotation, not by reading the code.
+        let vertical = NSAttributedString(string: "screen px per mm", attributes: label)
+        let verticalSize = vertical.size()
+        NSGraphicsContext.saveGraphicsState()
+        let transform = NSAffineTransform()
+        transform.translateX(by: bounds.width - 6,
+                             yBy: inset.top + (h + verticalSize.width) / 2)
+        transform.rotate(byDegrees: -90)
+        transform.concat()
+        vertical.draw(at: NSPoint(x: 0, y: -verticalSize.height))
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func niceStep(_ max: Double) -> Double {
@@ -533,8 +545,6 @@ final class TunerController: NSObject, NSWindowDelegate {
     private let status = NSTextField(labelWithString: "")
     private let readout = LiveReadout()
     private let knee = NSTextField(labelWithString: "")
-    private var sliders: [String: SliderRow] = [:]
-    private var toggles: [String: NSButton] = [:]
     let window: NSWindow
 
     override init() {
@@ -571,7 +581,7 @@ final class TunerController: NSObject, NSWindowDelegate {
             controls.addArrangedSubview(label)
         }
 
-        func slider(_ key: String, _ title: String, _ help: String,
+        func slider(_ title: String, _ help: String,
                     _ range: ClosedRange<Double>, _ decimals: Int,
                     _ get: @escaping (Tuning) -> Double,
                     _ set: @escaping (inout Tuning, Double) -> Void) {
@@ -582,12 +592,11 @@ final class TunerController: NSObject, NSWindowDelegate {
                 set(&self.tuning, v)
                 self.apply(save: committed)
             }
-            sliders[key] = row
             controls.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: controls.widthAnchor, constant: -36).isActive = true
         }
 
-        func toggle(_ key: String, _ title: String,
+        func toggle(_ title: String,
                     _ get: @escaping (Tuning) -> Bool,
                     _ set: @escaping (inout Tuning, Bool) -> Void) {
             let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
@@ -597,21 +606,20 @@ final class TunerController: NSObject, NSWindowDelegate {
                 set(&self.tuning, button.state == .on)
                 self.apply()
             }
-            toggles[key] = button
             controls.addArrangedSubview(button)
         }
 
         heading("Pointer")
-        toggle("accel", "Acceleration", { $0.accelEnabled }, { $0.accelEnabled = $1 })
-        slider("gain", "Gain", "px per mm at the reference speed", 4...40, 0,
+        toggle("Acceleration", { $0.accelEnabled }, { $0.accelEnabled = $1 })
+        slider("Gain", "px per mm at the reference speed", 4...40, 0,
                { $0.pointerGain }, { $0.pointerGain = $1 })
-        slider("min", "Floor", "slow-movement multiplier — precision", 0.1...1.5, 2,
+        slider("Floor", "slow-movement multiplier — precision", 0.1...1.5, 2,
                { $0.accelMin }, { $0.accelMin = $1 })
-        slider("max", "Ceiling", "fast-movement multiplier — reach", 1...6, 1,
+        slider("Ceiling", "fast-movement multiplier — reach", 1...6, 1,
                { $0.accelMax }, { $0.accelMax = $1 })
-        slider("ref", "Pivot", "",
+        slider("Pivot", "",
                60...400, 0, { $0.accelPivot }, { $0.accelPivot = $1 })
-        slider("curve", "Curve", "", 0.4...2.5, 2,
+        slider("Curve", "", 0.4...2.5, 2,
                { $0.accelCurve }, { $0.accelCurve = $1 })
 
         knee.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -619,50 +627,41 @@ final class TunerController: NSObject, NSWindowDelegate {
         controls.addArrangedSubview(knee)
 
         heading("Stopping")
-        toggle("gate", "Cut the deceleration tail",
+        toggle("Cut the deceleration tail",
                { $0.stopGateEnabled }, { $0.stopGateEnabled = $1 })
-        slider("arm", "Arm above", "mm/s the finger must reach before a tail is possible",
+        slider("Arm above", "mm/s the finger must reach before a tail is possible",
                20...250, 0, { $0.armSpeed }, { $0.armSpeed = $1 })
-        slider("stop", "Cut below", "mm/s under which decaying motion is treated as tail",
+        slider("Cut below", "mm/s under which decaying motion is treated as tail",
                20...250, 0, { $0.stopSpeed }, { $0.stopSpeed = $1 })
 
         controls = scrollControls
 
         heading("Scroll")
-        slider("scroll", "Gain", "px per mm", 8...80, 0,
+        slider("Gain", "px per mm", 8...80, 0,
                { $0.scrollGain }, { $0.scrollGain = $1 })
-        slider("decay", "Momentum decay", "seconds", 0.05...0.8, 2,
+        slider("Momentum decay", "seconds", 0.05...0.8, 2,
                { $0.scrollDecay }, { $0.scrollDecay = $1 })
-        toggle("inertia", "Inertia", { $0.momentumEnabled }, { $0.momentumEnabled = $1 })
-        toggle("natural", "Natural direction", { $0.naturalScroll }, { $0.naturalScroll = $1 })
+        toggle("Inertia", { $0.momentumEnabled }, { $0.momentumEnabled = $1 })
+        toggle("Natural direction", { $0.naturalScroll }, { $0.naturalScroll = $1 })
 
         controls = tapControls
 
         heading("Taps")
-        toggle("tap", "Tap to click", { $0.tapEnabled }, { $0.tapEnabled = $1 })
-        toggle("righttap", "Two-finger tap right-clicks",
+        toggle("Tap to click", { $0.tapEnabled }, { $0.tapEnabled = $1 })
+        toggle("Two-finger tap right-clicks",
                { $0.rightTapEnabled }, { $0.rightTapEnabled = $1 })
-        slider("taptime", "Tap time", "seconds", 0.1...1.0, 2,
+        slider("Tap time", "seconds", 0.1...1.0, 2,
                { $0.tapTime }, { $0.tapTime = $1 })
-        slider("taptravel", "Tap travel", "mm", 0.5...8, 1,
+        slider("Tap travel", "mm", 0.5...8, 1,
                { $0.tapTravel }, { $0.tapTravel = $1 })
-        slider("twotaptime", "Two-finger time", "seconds", 0.1...1.2, 2,
+        slider("Two-finger time", "seconds", 0.1...1.2, 2,
                { $0.twoTapTime }, { $0.twoTapTime = $1 })
-        slider("twotaptravel", "Two-finger travel", "mm", 0.5...12, 1,
+        slider("Two-finger travel", "mm", 0.5...12, 1,
                { $0.twoTapTravel }, { $0.twoTapTravel = $1 })
-        slider("dbltime", "Double-tap gap", "seconds between taps, not counting the taps",
+        slider("Double-tap gap", "seconds between taps, not counting the taps",
                0.1...1.0, 2, { $0.doubleTapTime }, { $0.doubleTapTime = $1 })
-        slider("dbldist", "Double-tap distance", "mm", 1...20, 1,
+        slider("Double-tap distance", "mm", 1...20, 1,
                { $0.doubleTapDistance }, { $0.doubleTapDistance = $1 })
-
-        // One reset for both tabs, in the footer, so neither tab looks like it
-        // owns a button that resets the other's values too.
-        let reset = NSButton(title: "Reset to defaults", target: nil, action: nil)
-        reset.setAction { [weak self] in
-            self?.tuning = Tuning()
-            self?.reloadControls()
-            self?.apply()
-        }
 
         func scrolling(_ stack: NSStackView) -> NSScrollView {
             let scroll = NSScrollView()
@@ -772,7 +771,7 @@ final class TunerController: NSObject, NSWindowDelegate {
         legend.widthAnchor.constraint(equalToConstant: 150).isActive = true
         legend.heightAnchor.constraint(equalToConstant: 12).isActive = true
 
-        let footer = NSStackView(views: [reset, legend, NSView(), status])
+        let footer = NSStackView(views: [legend, NSView(), status])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.distribution = .fill
@@ -798,33 +797,6 @@ final class TunerController: NSObject, NSWindowDelegate {
         installReleaseMonitor()
     }
 
-    private func reloadControls() {
-        sliders["gain"]?.value = tuning.pointerGain
-        sliders["min"]?.value = tuning.accelMin
-        sliders["max"]?.value = tuning.accelMax
-        sliders["ref"]?.value = tuning.accelPivot
-        sliders["curve"]?.value = tuning.accelCurve
-        sliders["arm"]?.value = tuning.armSpeed
-        sliders["stop"]?.value = tuning.stopSpeed
-        sliders["scroll"]?.value = tuning.scrollGain
-        sliders["decay"]?.value = tuning.scrollDecay
-        sliders["taptime"]?.value = tuning.tapTime
-        sliders["taptravel"]?.value = tuning.tapTravel
-        sliders["twotaptime"]?.value = tuning.twoTapTime
-        sliders["twotaptravel"]?.value = tuning.twoTapTravel
-        sliders["dbltime"]?.value = tuning.doubleTapTime
-        sliders["dbldist"]?.value = tuning.doubleTapDistance
-        toggles["accel"]?.state = tuning.accelEnabled ? .on : .off
-        toggles["gate"]?.state = tuning.stopGateEnabled ? .on : .off
-        toggles["inertia"]?.state = tuning.momentumEnabled ? .on : .off
-        toggles["natural"]?.state = tuning.naturalScroll ? .on : .off
-        toggles["tap"]?.state = tuning.tapEnabled ? .on : .off
-        toggles["righttap"]?.state = tuning.rightTapEnabled ? .on : .off
-    }
-
-    /// Safety net for a drag that never delivers a final event — released
-    /// outside the window, or interrupted. Long enough that pausing mid-drag
-    /// does not itself cause a write.
     private var idleWrite: Timer?
 
     /// Set while a slider has moved but the value has not been written.
