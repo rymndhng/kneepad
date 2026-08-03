@@ -200,7 +200,7 @@ everything mouse mode did, so the pad stays usable while it runs.
 
 - One finger moves the cursor; the **primary contact is the oldest one down**,
   so a second finger landing doesn't yank the pointer.
-- Tap to click (≤0.25 s, ≤2 mm travel), two-finger tap for right click,
+- Tap to click (≤0.4 s, ≤2 mm travel), two-finger tap for right click,
   double-tap pairing by time *and* distance.
 - **Two-finger taps are judged on their own, looser budget** (≤0.6 s, ≤4 mm).
   The sequence spans the first touchdown to the last liftoff, so it absorbs

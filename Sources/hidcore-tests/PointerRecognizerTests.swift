@@ -116,7 +116,7 @@ func runPointerRecognizerTests() {
         TestRunner.test("a long press is not a tap") {
             let h = Harness()
             _ = h.step([contact(0, 20, 20)])
-            h.hold([contact(0, 20, 20)], frames: 40)   // 0.4s, past tapMaxDuration
+            h.hold([contact(0, 20, 20)], frames: 80)   // 0.8s, past tapMaxDuration
             expectEqual(taps(h.step([])).count, 0)
         }
 
