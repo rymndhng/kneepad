@@ -58,7 +58,7 @@ func printUsage() {
       touchd --minimal              STRIP EVERYTHING: no filter, no lead, no
                                     acceleration. Raw delta x gain, nothing else.
                                     Start here when the feel is wrong.
-      touchd --lead N               cancel firmware smoothing (default 1.0, 0=off)
+      touchd --lead N               cancel firmware smoothing (default 1.25, 0=off)
       touchd --settle N             how hard a stop is snapped to (default 4)
       touchd --deadband N           mm treated as noise, not lag (default 0.25)
       touchd --no-filter            disable the 1€ filter, keep lead
@@ -66,9 +66,14 @@ func printUsage() {
 
       Jittery cursor when still  → lower --cutoff, or lower --beta
       Laggy when moving fast     → raise --beta
-      Drifts on after you stop   → raise --lead; the tail is in the raw
-                                   absolute stream, and gain multiplies it
-      Overshoots / feels jumpy   → lower --lead
+
+      Tuning --lead: it inverts the firmware's low-pass, so there is one
+      correct value rather than a taste range, and the error is asymmetric.
+      Too low leaves some drift after a stop but is otherwise clean; too
+      high makes the cursor dart past the stop and snap back. Raise it in
+      0.25 steps until that snap-back appears, then back off one step.
+      Useful range is roughly 1 to 4; anything finer than 0.25 is below
+      what you can feel. It also amplifies noise by (1 + 2 x lead).
 
       The stages are independent. To isolate the tail without the filter
       fighting it:   touchd --minimal --lead 2.5
@@ -168,7 +173,10 @@ if args.contains("--hard-stop") {
     pointerConfig.stopGate.makeAggressive()
     if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
     if let s = value("--arm-speed") { pointerConfig.stopGate.armSpeed = s }
-    if value("--lead") == nil { smoothing.leadGain = 2.5 }
+    // A modest bump, not the 2.57 a full inversion of the first trace implied.
+    // The default of 1.25 was found by feel, and overshooting the true value
+    // makes the cursor snap back — a worse artefact than the drift it removes.
+    if value("--lead") == nil { smoothing.leadGain = 1.75 }
 }
 
 // MARK: - Permissions

@@ -154,11 +154,22 @@ public struct SmoothingConfiguration {
     /// motion is delivered when it happened rather than trailing after.
     ///
     /// ⚠️ How much smoothing the firmware actually applies is NOT well
-    /// established. A first trace suggested a ≈ 0.28 (gain 2.5) over ~85ms,
+    /// established. A first trace suggested a ≈ 0.28 (gain 2.57) over ~85ms,
     /// but a second trace of the same gesture showed a shorter, less regular
-    /// decay that a single IIR does not fit. The default is deliberately
-    /// conservative until more traces settle it. Set to 0 to disable.
-    public var leadGain = 1.0
+    /// decay that a single IIR does not fit.
+    ///
+    /// 1.25 was settled on by feel, and the asymmetry of the error makes that
+    /// meaningful: undershooting the true value leaves some tail but is
+    /// otherwise clean, while overshooting it produces overshoot — the cursor
+    /// darts past a stop and snaps back. Those are distinguishable sensations,
+    /// so a value chosen by raising it until overshoot appears brackets the
+    /// truth from below. It also implies a ≈ 0.44, well short of the 0.28 the
+    /// first trace suggested; either that trace was unrepresentative, or the
+    /// firmware is not a clean single pole and full inversion overcorrects the
+    /// part that is not first-order.
+    ///
+    /// Set to 0 to disable.
+    public var leadGain = 1.25
     /// Hz. Lower is steadier at rest; too low and slow movement feels sticky.
     public var minCutoff = 1.2
     /// Speed coupling. Higher responds faster but passes more jitter.
