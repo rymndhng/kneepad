@@ -39,6 +39,8 @@ final class CurveView: NSView {
     /// collide with whatever accent the user has chosen, this rotates the
     /// accent's own hue halfway round the wheel, which stays distinct from any
     /// of them. Graphite has no hue to rotate, so it falls back to orange.
+    var indicatorColor: NSColor { liveColor }
+
     private var liveColor: NSColor {
         guard let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) else {
             return .systemOrange
@@ -109,6 +111,36 @@ final class CurveView: NSView {
             gy += step
         }
 
+        // The reference speed, where the multiplier is exactly 1.
+        //
+        // Worth drawing because it is the one landmark that does NOT move when
+        // the curve exponent changes — the curve pivots about it. Without it on
+        // screen the only visible landmark is the knee, which does move, and
+        // dragging the curve slider looks like it is dragging the reference.
+        if tuning.accelEnabled, tuning.accelReference > sMin,
+           tuning.accelReference < sMax {
+            let pivot = NSPoint(x: x(tuning.accelReference), y: y(tuning.pointerGain))
+            NSColor.tertiaryLabelColor.setStroke()
+            let mark = NSBezierPath()
+            mark.move(to: NSPoint(x: pivot.x, y: inset.top + h))
+            mark.line(to: pivot)
+            mark.lineWidth = 1
+            mark.setLineDash([2, 3], count: 2, phase: 0)
+            mark.stroke()
+
+            NSColor.secondaryLabelColor.setStroke()
+            let cross = NSBezierPath()
+            cross.move(to: NSPoint(x: pivot.x - 4, y: pivot.y))
+            cross.line(to: NSPoint(x: pivot.x + 4, y: pivot.y))
+            cross.move(to: NSPoint(x: pivot.x, y: pivot.y - 4))
+            cross.line(to: NSPoint(x: pivot.x, y: pivot.y + 4))
+            cross.lineWidth = 1.5
+            cross.stroke()
+
+            NSAttributedString(string: "×1 pivot", attributes: label)
+                .draw(at: NSPoint(x: pivot.x + 7, y: pivot.y - 12))
+        }
+
         let curve = NSBezierPath()
         for px in 0...Int(w) {
             let t = Double(px) / w
@@ -158,16 +190,9 @@ final class CurveView: NSView {
             NSBezierPath(ovalIn: NSRect(x: point.x - 4.5, y: point.y - 4.5,
                                         width: 9, height: 9)).fill()
 
-            let text = NSAttributedString(
-                string: String(format: "%.0f mm/s → %.1f px/mm", speed, px),
-                attributes: [
-                    .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
-                    .foregroundColor: live,
-                ])
-            // Flip the label inside the plot when the dot is near the edge.
-            let tx = point.x + 10 + text.size().width > inset.left + w
-                ? point.x - 10 - text.size().width : point.x + 10
-            text.draw(at: NSPoint(x: tx, y: max(inset.top, point.y - 16)))
+            // The numbers live in a fixed readout below the chart. A label
+            // pinned to the dot moves with it, which at 60Hz is unreadable
+            // however it is positioned.
         }
 
         let axis = NSAttributedString(string: "finger speed — mm/s, log scale", attributes: label)
@@ -354,12 +379,107 @@ final class SliderRow: NSStackView {
     }
 }
 
+/// Fixed readout of what the pointer is doing, below the chart.
+///
+/// Two things make live numbers legible. They sit still, and they include a
+/// peak that holds after the gesture — an instantaneous value sampled at 60 Hz
+/// cannot be read at all, but the fastest point of a flick can.
+final class LiveReadout: NSStackView {
+    private let speed = LiveReadout.value()
+    private let rate = LiveReadout.value()
+    private let peak = LiveReadout.value()
+    private let zone = LiveReadout.value()
+
+    private var peakSpeed = 0.0
+    private var peakAt = 0.0
+    /// How long the peak stays on screen before it starts following the input
+    /// down again. Long enough to look at, short enough not to mislead.
+    private let peakHold = 2.0
+
+    /// The instantaneous figures update at 12 Hz rather than 60. Faster is not
+    /// more informative — the digits just blur.
+    private var tick = 0
+
+    private static func value() -> NSTextField {
+        let field = NSTextField(labelWithString: "—")
+        field.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+        field.alignment = .left
+        return field
+    }
+
+    private static func caption(_ text: String) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
+        field.textColor = .tertiaryLabelColor
+        return field
+    }
+
+    init() {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        distribution = .fillEqually
+        alignment = .top
+        spacing = 12
+
+        for (caption, field) in [("SPEED", speed), ("RATE", rate),
+                                 ("PEAK", peak), ("ZONE", zone)] {
+            let column = NSStackView(views: [LiveReadout.caption(caption), field])
+            column.orientation = .vertical
+            column.alignment = .leading
+            column.spacing = 0
+            addArrangedSubview(column)
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func update(speed value: Double, tuning: Tuning, touching: Bool, accent: NSColor) {
+        let now = TelemetryChannel.now
+        if touching, value > peakSpeed || now - peakAt > peakHold {
+            peakSpeed = value
+            peakAt = now
+        }
+
+        tick += 1
+        guard tick % 5 == 0 else { return }
+
+        guard touching else {
+            speed.stringValue = "—"
+            rate.stringValue = "—"
+            zone.stringValue = "—"
+            speed.textColor = .tertiaryLabelColor
+            zone.textColor = .tertiaryLabelColor
+            if now - peakAt > peakHold { peak.stringValue = "—" }
+            return
+        }
+
+        let px = tuning.pixelsPerMillimetre(atSpeed: value)
+        speed.stringValue = String(format: "%.0f mm/s", value)
+        rate.stringValue = String(format: "%.1f px/mm", px)
+        peak.stringValue = String(format: "%.0f mm/s", peakSpeed)
+        speed.textColor = accent
+        peak.textColor = .labelColor
+        rate.textColor = .labelColor
+
+        // The question the knee is set to answer: is this gesture being
+        // amplified, or is it inside the flat zone?
+        if value < tuning.accelerationKnee {
+            zone.stringValue = "flat"
+            zone.textColor = .secondaryLabelColor
+        } else {
+            zone.stringValue = String(format: "×%.2f", px / tuning.pointerGain)
+            zone.textColor = accent
+        }
+    }
+}
+
 // MARK: - Window
 
 final class TunerController: NSObject, NSWindowDelegate {
     private var tuning = Tuning.load() ?? Tuning()
     private let curve = CurveView()
     private let status = NSTextField(labelWithString: "")
+    private let readout = LiveReadout()
     private let knee = NSTextField(labelWithString: "")
     private var sliders: [String: SliderRow] = [:]
     private var toggles: [String: NSButton] = [:]
@@ -430,9 +550,14 @@ final class TunerController: NSObject, NSWindowDelegate {
                { $0.accelMin }, { $0.accelMin = $1 })
         slider("max", "Ceiling", "fast-movement multiplier — reach", 1...6, 1,
                { $0.accelMax }, { $0.accelMax = $1 })
-        slider("ref", "Reference", "mm/s where the multiplier is 1; lower shrinks the flat zone",
+        slider("ref", "Reference",
+               "mm/s where the multiplier is exactly 1 — the point the curve "
+               + "pivots about. Lower shrinks the flat zone",
                60...400, 0, { $0.accelReference }, { $0.accelReference = $1 })
-        slider("curve", "Curve", "steepness above the knee", 0.4...2.5, 2,
+        slider("curve", "Curve",
+               "steepness above the knee. The curve pivots about the reference, "
+               + "so this moves where the flat zone ends without moving the "
+               + "reference itself", 0.4...2.5, 2,
                { $0.accelCurve }, { $0.accelCurve = $1 })
 
         knee.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -497,13 +622,14 @@ final class TunerController: NSObject, NSWindowDelegate {
         status.textColor = .secondaryLabelColor
         status.stringValue = "touchd applies changes as you move a slider"
 
-        let right = NSStackView(views: [curve, status])
+        let right = NSStackView(views: [curve, readout, status])
         right.orientation = .vertical
         right.alignment = .leading
         right.spacing = 8
         right.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 12, right: 14)
         curve.translatesAutoresizingMaskIntoConstraints = false
         curve.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
+        readout.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
 
         let split = NSSplitView()
         split.isVertical = true
@@ -609,12 +735,16 @@ final class TunerController: NSObject, NSWindowDelegate {
             guard let telemetry, telemetry.isLive() else {
                 if curve.liveSpeed != nil { curve.liveSpeed = nil }
                 if !curve.trail.isEmpty { curve.trail.removeAll(); curve.needsDisplay = true }
+                readout.update(speed: 0, tuning: tuning, touching: false,
+                               accent: curve.indicatorColor)
                 return
             }
 
             let sample = telemetry.read()
             let touching = sample.contacts > 0 && sample.speed > 0
             curve.liveSpeed = touching ? sample.speed : nil
+            readout.update(speed: sample.speed, tuning: tuning, touching: touching,
+                           accent: curve.indicatorColor)
             if touching {
                 curve.trail.append(sample.speed)
                 if curve.trail.count > 90 { curve.trail.removeFirst() }   // ~1.5s
