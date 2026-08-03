@@ -15,13 +15,13 @@ func printUsage() {
     USAGE
       touchd                        run the driver
       touchd --pointer-gain N       cursor px per mm (default 16)
-      touchd --scroll-gain N        scroll px per mm (default 32)
+      touchd --scroll-gain N        scroll px per mm (default 44)
       touchd --friction N           per-tick friction (derived from --decay)
-      touchd --flick N              mm/s release speed for momentum (default 2)
+      touchd --flick N              mm/s release speed for momentum (default 1.45)
       touchd --accel-max N          multiplier ceiling, fast movement (default 3.2)
       touchd --accel-min N          multiplier floor, slow movement (default 0.6)
       touchd --accel-curve N        steepness above the knee (default 0.92)
-      touchd --accel-ref N          mm/s where the multiplier is exactly 1 (260)
+      touchd --accel-pivot N        mm/s the curve turns about (default 260)
                                     lower = smaller flat zone, earlier accel
       touchd --no-accel             disable pointer acceleration
       touchd --decay N              momentum decay time constant (default 0.27s)
@@ -29,11 +29,11 @@ func printUsage() {
       touchd --no-tap               disable tap-to-click
       touchd --no-right-tap         two-finger tap does not right click
       touchd --tap-time N           tap max duration (default 0.4s)
-      touchd --tap-travel N         tap max travel (default 2mm)
+      touchd --tap-travel N         tap max travel (default 1.45mm)
       touchd --two-tap-time N       two-finger tap max duration (default 0.6s)
-      touchd --two-tap-travel N     two-finger tap max travel (default 4mm)
+      touchd --two-tap-travel N     two-finger tap max travel (default 2.9mm)
       touchd --double-tap-time N    max gap between paired taps (default 0.4s)
-      touchd --double-tap-dist N    how far apart paired taps may land (8mm)
+      touchd --double-tap-dist N    how far apart paired taps may land (5.8mm)
       touchd --surface N            override the measured 40mm pad width
       touchd --no-live              ignore the tuning file; use flags only
       touchd --reverse              invert scroll direction
@@ -43,8 +43,8 @@ func printUsage() {
 
     STOPPING (cutting the firmware's deceleration tail)
       touchd --hard-stop            aggressive stop gate preset
-      touchd --stop-speed N         mm/s below which a decaying move is tail (60)
-      touchd --arm-speed N          mm/s the finger must reach first (120)
+      touchd --stop-speed N         mm/s below which a decaying move is tail (44)
+      touchd --arm-speed N          mm/s the finger must reach first (87)
       touchd --no-stop-gate         let the tail through
 
       Cursor glides on after you stop   → --hard-stop, or raise --stop-speed
@@ -123,7 +123,7 @@ if let g = value("--pointer-gain") { pointerConfig.gain = g }
 if let a = value("--accel-max") { pointerConfig.maxAcceleration = a }
 if let a = value("--accel-min") { pointerConfig.minAcceleration = a }
 if let c = value("--accel-curve") { pointerConfig.accelerationCurve = c }
-if let r = value("--accel-ref") { pointerConfig.accelerationReference = r }
+if let r = value("--accel-pivot") { pointerConfig.accelerationPivot = r }
 if args.contains("--no-accel") { pointerConfig.accelerationEnabled = false }
 if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
 if let s = value("--arm-speed") { pointerConfig.stopGate.armSpeed = s }
@@ -207,7 +207,7 @@ print("Pipeline      raw report from device")
 stage("acceleration", pointerConfig.accelerationEnabled,
       String(format: "×%.2f–%.2f, curve %.2f, ref %.0f mm/s",
              pointerConfig.minAcceleration, pointerConfig.maxAcceleration,
-             pointerConfig.accelerationCurve, pointerConfig.accelerationReference))
+             pointerConfig.accelerationCurve, pointerConfig.accelerationPivot))
 stage("stop gate", pointerConfig.stopGate.enabled,
       String(format: "cut below %.0f mm/s, armed above %.0f",
              pointerConfig.stopGate.stopSpeed, pointerConfig.stopGate.armSpeed))

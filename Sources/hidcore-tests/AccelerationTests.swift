@@ -24,8 +24,8 @@ func runAccelerationTests() {
         let config = PointerSynthesizer.Configuration()
 
         TestRunner.test("gain applies literally at the reference speed") {
-            expectClose(pxPerMm(config.accelerationReference, config), config.gain, 0.001,
-                        "that is what accelerationReference means")
+            expectClose(pxPerMm(config.accelerationPivot, config), config.gain, 0.001,
+                        "that is what accelerationPivot means")
         }
 
         // Reported from use: "at low speeds it's too slow, at high speeds too

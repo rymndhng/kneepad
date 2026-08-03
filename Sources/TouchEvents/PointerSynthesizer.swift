@@ -40,7 +40,7 @@ public final class PointerSynthesizer {
         /// what matters: a wide flat zone with a *gentle* ramp above it feels
         /// different from a narrow zone with a steep one, even where the two
         /// curves cross. Read them together, not separately.
-        public var accelerationReference = 260.0
+        public var accelerationPivot = 260.0
 
         /// Curve steepness past the knee. Higher climbs to the ceiling faster.
         ///
@@ -70,7 +70,7 @@ public final class PointerSynthesizer {
             guard accelerationEnabled else { return 1 }
             return min(maxAcceleration,
                        max(minAcceleration,
-                           pow(speed / accelerationReference, accelerationCurve)))
+                           pow(speed / accelerationPivot, accelerationCurve)))
         }
 
         /// Screen pixels per millimetre of finger travel at a given speed.
@@ -81,7 +81,7 @@ public final class PointerSynthesizer {
         /// Where the power law overtakes the floor and amplification begins.
         public var accelerationKnee: Double {
             guard accelerationEnabled, accelerationCurve > 0 else { return .infinity }
-            return accelerationReference * pow(minAcceleration, 1 / accelerationCurve)
+            return accelerationPivot * pow(minAcceleration, 1 / accelerationCurve)
         }
     }
 

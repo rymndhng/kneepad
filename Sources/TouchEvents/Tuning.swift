@@ -18,7 +18,7 @@ public struct Tuning: Codable, Equatable {
     public var accelMin = 0.6
     public var accelMax = 3.2
     public var accelCurve = 0.92
-    public var accelReference = 260.0
+    public var accelPivot = 260.0
 
     // Stopping
     public var stopGateEnabled = true
@@ -92,7 +92,7 @@ public struct Tuning: Codable, Equatable {
         config.minAcceleration = accelMin
         config.maxAcceleration = accelMax
         config.accelerationCurve = accelCurve
-        config.accelerationReference = accelReference
+        config.accelerationPivot = accelPivot
         config.stopGate.enabled = stopGateEnabled
         config.stopGate.armSpeed = armSpeed
         config.stopGate.stopSpeed = stopSpeed

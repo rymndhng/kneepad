@@ -24,7 +24,7 @@ func runTuningTests() {
             expectClose(tuning.accelMin, pointer.minAcceleration, 1e-9)
             expectClose(tuning.accelMax, pointer.maxAcceleration, 1e-9)
             expectClose(tuning.accelCurve, pointer.accelerationCurve, 1e-9)
-            expectClose(tuning.accelReference, pointer.accelerationReference, 1e-9)
+            expectClose(tuning.accelPivot, pointer.accelerationPivot, 1e-9)
             expectClose(tuning.armSpeed, pointer.stopGate.armSpeed, 1e-9)
             expectClose(tuning.stopSpeed, pointer.stopGate.stopSpeed, 1e-9)
 
@@ -47,7 +47,7 @@ func runTuningTests() {
             tuning.accelMin = 0.42
             tuning.accelMax = 4.25
             tuning.accelCurve = 0.85
-            tuning.accelReference = 215
+            tuning.accelPivot = 215
             tuning.accelEnabled = false
             tuning.stopGateEnabled = false
             tuning.armSpeed = 77
@@ -83,7 +83,7 @@ func runTuningTests() {
         TestRunner.test("applying reaches every configuration") {
             var tuning = Tuning()
             tuning.pointerGain = 9
-            tuning.accelReference = 200
+            tuning.accelPivot = 200
             tuning.stopSpeed = 45
             tuning.scrollGain = 50
             tuning.tapTravel = 1.5
@@ -96,7 +96,7 @@ func runTuningTests() {
             tuning.apply(to: recognizer)
 
             expectClose(pointer.gain, 9, 1e-9)
-            expectClose(pointer.accelerationReference, 200, 1e-9)
+            expectClose(pointer.accelerationPivot, 200, 1e-9)
             expectClose(pointer.stopGate.stopSpeed, 45, 1e-9)
             expectClose(scroll.gain, 50, 1e-9)
             expectClose(recognizer.tapMaxTravel, 1.5, 1e-9)
@@ -109,7 +109,7 @@ func runTuningTests() {
             var tuning = Tuning()
             tuning.pointerGain = 15
             tuning.accelCurve = 0.9
-            tuning.accelReference = 210
+            tuning.accelPivot = 210
 
             var config = PointerSynthesizer.Configuration()
             tuning.apply(to: &config)

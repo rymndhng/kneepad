@@ -53,7 +53,7 @@ the displacement earlier instead of discarding it — did not.
    the entire aiming range. Reported as "too slow at low speeds, too fast at
    high". The floor survives at 0.6; the reasoning behind 0.2 did not.
 4. **A sub-1 curve exponent being required for a flat mid-range.** Stated in a
-   comment and a test, and false. The flat span is `reference × floor^(1/curve)`
+   comment and a test, and false. The flat span is `pivot × floor^(1/curve)`
    — set by the floor and the reference, not the exponent. The shipped curve is
    1.1 and its flat span is *wider* than 0.6's was.
 
@@ -83,7 +83,7 @@ before adding the stage.
 ## Settled values
 
 ```
---pointer-gain 16 --accel-ref 260 --accel-min 0.6 --accel-max 3.2 --accel-curve 0.92
+--pointer-gain 16 --accel-pivot 260 --accel-min 0.6 --accel-max 3.2 --accel-curve 0.92
 ```
 
 All found by hand, at an equivalent gain of 12 and reference of 170 — those
@@ -91,7 +91,7 @@ were denominated in the descriptor's inflated millimetre. The sensor measures
 40 mm against a claimed 55, so the constants were rescaled once when that was
 settled. Same feel, real units.
 
-The reference wandered: 190, then 124, then 260 real mm/s, the last move paired
+The pivot wandered: 190, then 124, then 260 real mm/s, the last move paired
 with the exponent dropping below 1. The pair is what matters — a wide flat zone
 with a gentle ramp above it feels unlike a narrow zone with a steep one, even
 where the two curves cross. The flat zone now runs to 149 mm/s and the ceiling

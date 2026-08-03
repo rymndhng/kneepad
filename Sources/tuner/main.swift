@@ -88,7 +88,7 @@ final class CurveView: NSView {
         // Named marks sit on the axis, so a decade label too close to one is
         // dropped rather than overprinted.
         let named = tuning.accelEnabled
-            ? [tuning.accelReference, tuning.accelerationKnee].filter { $0 > sMin && $0 < sMax }
+            ? [tuning.accelPivot, tuning.accelerationKnee].filter { $0 > sMin && $0 < sMax }
             : []
         NSColor.separatorColor.setStroke()
         for v in [10.0, 30, 100, 300, 1000] where v <= sMax {
@@ -142,7 +142,7 @@ final class CurveView: NSView {
         if tuning.accelEnabled {
             // Guide lines to where each lands on the curve.
             NSColor.separatorColor.setStroke()
-            for speed in [tuning.accelReference, knee] where speed > sMin && speed < sMax {
+            for speed in [tuning.accelPivot, knee] where speed > sMin && speed < sMax {
                 let guideLine = NSBezierPath()
                 guideLine.move(to: NSPoint(x: x(speed), y: inset.top + h))
                 guideLine.line(to: NSPoint(x: x(speed),
@@ -157,9 +157,9 @@ final class CurveView: NSView {
             // its text — the reference is the one that anchors the curve.
             // "260 pivot" is wider than the "x1" it replaced, so the two
             // labels start overlapping sooner.
-            let crowded = abs(x(knee) - x(tuning.accelReference)) < 58
+            let crowded = abs(x(knee) - x(tuning.accelPivot)) < 58
             axisMark(knee, crowded ? "" : "\(Int(knee)) knee", emphasis: false)
-            axisMark(tuning.accelReference, "\(Int(tuning.accelReference)) pivot",
+            axisMark(tuning.accelPivot, "\(Int(tuning.accelPivot)) pivot",
                      emphasis: true)
 
             // And the rate the reference produces, on the vertical axis.
@@ -609,8 +609,8 @@ final class TunerController: NSObject, NSWindowDelegate {
                { $0.accelMin }, { $0.accelMin = $1 })
         slider("max", "Ceiling", "fast-movement multiplier — reach", 1...6, 1,
                { $0.accelMax }, { $0.accelMax = $1 })
-        slider("ref", "Reference", "",
-               60...400, 0, { $0.accelReference }, { $0.accelReference = $1 })
+        slider("ref", "Pivot", "",
+               60...400, 0, { $0.accelPivot }, { $0.accelPivot = $1 })
         slider("curve", "Curve", "", 0.4...2.5, 2,
                { $0.accelCurve }, { $0.accelCurve = $1 })
 
@@ -802,7 +802,7 @@ final class TunerController: NSObject, NSWindowDelegate {
         sliders["gain"]?.value = tuning.pointerGain
         sliders["min"]?.value = tuning.accelMin
         sliders["max"]?.value = tuning.accelMax
-        sliders["ref"]?.value = tuning.accelReference
+        sliders["ref"]?.value = tuning.accelPivot
         sliders["curve"]?.value = tuning.accelCurve
         sliders["arm"]?.value = tuning.armSpeed
         sliders["stop"]?.value = tuning.stopSpeed
