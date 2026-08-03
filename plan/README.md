@@ -428,6 +428,34 @@ thing it targets is large enough to see in the output.
 
 ---
 
+## Tuning app
+
+`swift run tuner` opens a panel of sliders beside a live plot of the
+acceleration curve. It writes
+`~/Library/Application Support/teach-touch/tuning.json`; `touchd` watches that
+file and applies changes **without restarting**, so the loop is: move a slider,
+move your finger, feel the difference.
+
+```
+swift run tuner        # in one terminal
+./.build/debug/touchd  # in another
+```
+
+Precedence is: built-in defaults, then the tuning file, then command-line flags.
+So a flag still wins for a one-off experiment, and `--no-live` ignores the file
+entirely.
+
+Two notes on the build:
+
+- **AppKit, not SwiftUI.** This Command Line Tools install has no macro plugins,
+  so `@State` fails to resolve — the same gap that makes XCTest unusable here.
+- **The curve is defined once**, in `PointerSynthesizer.Configuration`. The
+  plot, the driver and the tests all call it rather than restating the formula.
+  A previous version of this project had the arithmetic written out in three
+  places, and the documentation drifted from the code twice.
+
+---
+
 ## Open TODOs
 
 ### Bake in the true surface size

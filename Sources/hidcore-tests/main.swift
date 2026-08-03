@@ -13,5 +13,6 @@ runPointerRecognizerTests()
 runAccelerationTests()
 runStopGateTests()
 runCalibrationTests()
+runTuningTests()
 
 exit(TestRunner.summarize())

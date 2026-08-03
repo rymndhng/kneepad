@@ -56,6 +56,28 @@ public final class PointerSynthesizer {
         public var stopGate = StopGate()
 
         public init() {}
+
+        /// The speed-dependent multiplier. The single definition of the curve —
+        /// `move`, the tuner's plot and the tests all call this, because three
+        /// copies of one formula is how a picture ends up disagreeing with the
+        /// behaviour it claims to show.
+        public func accelerationFactor(atSpeed speed: Double) -> Double {
+            guard accelerationEnabled else { return 1 }
+            return min(maxAcceleration,
+                       max(minAcceleration,
+                           pow(speed / accelerationReference, accelerationCurve)))
+        }
+
+        /// Screen pixels per millimetre of finger travel at a given speed.
+        public func pixelsPerMillimetre(atSpeed speed: Double) -> Double {
+            gain * accelerationFactor(atSpeed: speed)
+        }
+
+        /// Where the power law overtakes the floor and amplification begins.
+        public var accelerationKnee: Double {
+            guard accelerationEnabled, accelerationCurve > 0 else { return .infinity }
+            return accelerationReference * pow(minAcceleration, 1 / accelerationCurve)
+        }
     }
 
     public var configuration: Configuration
@@ -117,19 +139,11 @@ public final class PointerSynthesizer {
         let speed = dt > 0 ? millimetres.magnitude / dt : 0
         if dt > 0, !configuration.stopGate.allows(speed: speed) { return }
 
+        // A power curve through (1, 1), clamped at both ends. The floor sits
+        // BELOW 1, so slow movement is attenuated rather than merely
+        // un-amplified.
         var scale = configuration.gain
-        if configuration.accelerationEnabled, dt > 0 {
-            let ratio = speed / configuration.accelerationReference
-
-            // A power curve through (1, 1), clamped at both ends. Crucially the
-            // floor is BELOW 1: slow movement is attenuated, not merely
-            // un-amplified. Without that, every slow artefact in the input —
-            // sensor tail included — arrives at full gain.
-            let factor = min(configuration.maxAcceleration,
-                             max(configuration.minAcceleration,
-                                 pow(ratio, configuration.accelerationCurve)))
-            scale *= factor
-        }
+        if dt > 0 { scale *= configuration.accelerationFactor(atSpeed: speed) }
 
         // Track the cursor in full precision between frames.
         //

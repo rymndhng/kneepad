@@ -6,18 +6,17 @@ import TouchEvents
 // the feel depends on rather than the exact numbers — a value can move without
 // breaking a test, but the character of the curve cannot.
 
-/// Reproduces `PointerSynthesizer.move`'s factor, so the shape can be checked
-/// without posting events into the window server.
+/// The driver's own curve, not a reimplementation of it — an earlier version of
+/// this file restated the formula, which is how a test can keep passing while
+/// the behaviour moves out from under it.
 private func factor(_ speed: Double,
                     _ c: PointerSynthesizer.Configuration) -> Double {
-    min(c.maxAcceleration,
-        max(c.minAcceleration,
-            pow(speed / c.accelerationReference, c.accelerationCurve)))
+    c.accelerationFactor(atSpeed: speed)
 }
 
 private func pxPerMm(_ speed: Double,
                      _ c: PointerSynthesizer.Configuration) -> Double {
-    c.gain * factor(speed, c)
+    c.pixelsPerMillimetre(atSpeed: speed)
 }
 
 func runAccelerationTests() {
@@ -47,8 +46,7 @@ func runAccelerationTests() {
         // a finger flexes over much less distance than it sweeps — never leave
         // the flat zone and the pad feels like hard work.
         TestRunner.test("the flat region covers aiming but not much more") {
-            let knee = config.accelerationReference
-                * pow(config.minAcceleration, 1 / config.accelerationCurve)
+            let knee = config.accelerationKnee
             check(knee > 60,
                   "flat only to \(Int(knee)) mm/s — amplification starts mid-aim")
             check(knee < 140,
@@ -102,8 +100,7 @@ func runAccelerationTests() {
         // happens above the knee. The test that survives is the one that
         // measures the flat span directly, above.
         TestRunner.test("the knee is where the floor and the power law meet") {
-            let knee = config.accelerationReference
-                * pow(config.minAcceleration, 1 / config.accelerationCurve)
+            let knee = config.accelerationKnee
             expectClose(factor(knee, config), config.minAcceleration, 0.001,
                         "the curve must leave the floor exactly at the knee")
             check(factor(knee * 1.5, config) > config.minAcceleration,

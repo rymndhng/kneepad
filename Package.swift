@@ -33,6 +33,15 @@ let package = Package(
         .executableTarget(name: "gesture-emit", dependencies: ["HIDCore", "TouchEvents"]),
         // Stages 3 + 4 — the actual driver: pointer, taps and scrolling.
         .executableTarget(name: "touchd", dependencies: ["HIDCore", "TouchEvents"]),
+        // Visual tuning panel. Writes the file touchd watches. AppKit rather
+        // than SwiftUI: this Command Line Tools install has no macro plugins,
+        // so @State and friends do not resolve — the same gap that rules out
+        // XCTest here.
+        .executableTarget(
+            name: "tuner",
+            dependencies: ["TouchEvents"],
+            linkerSettings: [.linkedFramework("AppKit")]
+        ),
         // Tests run as a plain executable: this Command Line Tools install has
         // neither a usable XCTest nor a working Testing.framework.
         //   swift run hidcore-tests

@@ -35,6 +35,7 @@ func printUsage() {
       touchd --double-tap-time N    max gap between paired taps (default 0.4s)
       touchd --double-tap-dist N    how far apart paired taps may land (8mm)
       touchd --surface N            true pad width in mm, if the descriptor lies
+      touchd --no-live              ignore the tuning file; use flags only
       touchd --reverse              invert scroll direction
 
       Two-finger tap not registering? Run --verbose; it prints why each
@@ -80,6 +81,10 @@ func value(_ flag: String) -> Double? {
     return Double(args[i + 1])
 }
 
+// Saved tuning underlies every default; command-line flags still override it,
+// and the `tuner` app rewrites this file live while the daemon runs.
+let liveTuning = args.contains("--no-live") ? nil : Tuning.load()
+
 let verbose = args.contains("--verbose")
 let dryRun = args.contains("--dry-run")
 let tapEnabled = !args.contains("--no-tap")
@@ -90,7 +95,10 @@ let rightTapEnabled = tapEnabled && !args.contains("--no-right-tap")
 // summary can print its real values instead of restating the defaults, which
 // is how the summary came to disagree with the code once already.
 let pointerRecognizer = PointerRecognizer()
-pointerRecognizer.twoFingerTapEnabled = rightTapEnabled
+liveTuning?.apply(to: pointerRecognizer)
+if args.contains("--no-tap") || args.contains("--no-right-tap") {
+    pointerRecognizer.twoFingerTapEnabled = rightTapEnabled
+}
 if let t = value("--tap-time") { pointerRecognizer.tapMaxDuration = t }
 if let d = value("--tap-travel") { pointerRecognizer.tapMaxTravel = d }
 if let t = value("--two-tap-time") { pointerRecognizer.twoFingerTapMaxDuration = t }
@@ -105,6 +113,7 @@ let showStats = args.contains("--stats")
 var scrollRecognizerScale = 1.0
 
 var scrollConfig = ScrollSynthesizer.Configuration()
+liveTuning?.apply(to: &scrollConfig)
 if let g = value("--scroll-gain") { scrollConfig.gain = g }
 if let t = value("--flick") { scrollConfig.momentumThreshold = t }
 if let d = value("--decay") { scrollConfig.momentumDecayTime = d }
@@ -113,6 +122,7 @@ if args.contains("--reverse") { scrollConfig.naturalDirection = false }
 if args.contains("--no-momentum") { scrollConfig.momentumEnabled = false }
 
 var pointerConfig = PointerSynthesizer.Configuration()
+liveTuning?.apply(to: &pointerConfig)
 if let g = value("--pointer-gain") { pointerConfig.gain = g }
 if let a = value("--accel-max") { pointerConfig.maxAcceleration = a }
 if let a = value("--accel-min") { pointerConfig.minAcceleration = a }
@@ -501,6 +511,23 @@ session.onFrame = { frame, _ in
         let ns = DispatchTime.now().uptimeNanoseconds - handlerStart.uptimeNanoseconds
         stats.record(handler: Double(ns) / 1_000_000_000)
     }
+}
+
+// Live tuning: the `tuner` app rewrites the file, and the change lands without
+// restarting. Handlers run on the main queue, which is where the HID callback
+// runs too, so no locking is needed around the synthesiser configs.
+var watcher: TuningWatcher?
+if !args.contains("--no-live") {
+    let w = TuningWatcher { updated in
+        updated.apply(to: &pointerSynthesizer.configuration)
+        updated.apply(to: &scrollSynthesizer.configuration)
+        updated.apply(to: pointerRecognizer)
+        print(String(format: "  tuning reloaded — gain %.0f px/mm, flat to %.0f mm/s",
+                     updated.pointerGain, updated.accelerationKnee))
+    }
+    w.start()
+    watcher = w
+    _ = watcher
 }
 
 session.start()
