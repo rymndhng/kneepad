@@ -36,6 +36,6 @@ let package = Package(
         // Tests run as a plain executable: this Command Line Tools install has
         // neither a usable XCTest nor a working Testing.framework.
         //   swift run hidcore-tests
-        .executableTarget(name: "hidcore-tests", dependencies: ["HIDCore"]),
+        .executableTarget(name: "hidcore-tests", dependencies: ["HIDCore", "TouchEvents"]),
     ]
 )

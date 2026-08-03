@@ -11,5 +11,7 @@ runContactTrackerTests()
 runScrollRecognizerTests()
 runPointerRecognizerTests()
 runSmoothingTests()
+runAccelerationTests()
+runStopGateTests()
 
 exit(TestRunner.summarize())

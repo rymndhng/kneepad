@@ -10,28 +10,39 @@ public final class PointerSynthesizer {
 
     public struct Configuration {
         /// Screen pixels per millimetre of finger travel, before acceleration.
-        public var gain = 20.0
+        public var gain = 24.0
         /// Peak multiplier for fast movement.
-        public var maxAcceleration = 3.0
+        public var maxAcceleration = 2.0
 
         /// Multiplier floor for slow movement.
         ///
-        /// This is the part that was missing, and it matters more than the
-        /// ceiling. A curve that only ever multiplies *up* passes slow motion
-        /// at full gain — including the deceleration tail in the raw stream,
-        /// which is then multiplied by `gain` and shows up as the cursor
-        /// drifting on after the finger stops. macOS's own curve attenuates
-        /// slow movement well below 1:1, which is both why it feels precise
-        /// and why the tail is invisible in mouse mode.
-        public var minAcceleration = 0.2
+        /// A curve that only ever multiplies *up* passes slow motion at full
+        /// gain — including the deceleration tail in the raw stream, which is
+        /// then multiplied by `gain` and shows up as the cursor drifting on
+        /// after the finger stops. So the floor sits below 1.
+        ///
+        /// But only just. At 0.2 the attenuation reached far past the tail and
+        /// into ordinary fine positioning, which felt sluggish. At 0.9 the
+        /// response is within a tenth of linear everywhere a finger actually
+        /// aims, while still taking the edge off the very slowest motion.
+        public var minAcceleration = 0.9
 
         /// Finger speed (mm/s) at which the multiplier is exactly 1, i.e. where
         /// `gain` applies literally.
         public var accelerationReference = 150.0
 
         /// Curve steepness. Higher widens the spread between slow and fast.
-        public var accelerationCurve = 1.2
+        ///
+        /// Below 1 the curve is concave: it reaches the floor late and the
+        /// ceiling early, so the useful middle of the range stays close to
+        /// linear and only a deliberate flick gets amplified. Above 1 it does
+        /// the opposite, which read as too slow when placing the cursor and
+        /// too fast when crossing the screen.
+        public var accelerationCurve = 0.6
         public var accelerationEnabled = true
+
+        /// Suppresses the sensor's deceleration tail after a fast stop.
+        public var stopGate = StopGate()
 
         public init() {}
     }
@@ -78,6 +89,8 @@ public final class PointerSynthesizer {
     public func resync() {
         cursor = nil
         cachedBounds = nil
+        // A gate left closed would swallow the start of the next touch.
+        configuration.stopGate.reset()
     }
 
     // MARK: Motion
@@ -87,6 +100,13 @@ public final class PointerSynthesizer {
     }
 
     private func move(_ millimetres: Point, dt: Double) {
+        // Drop the firmware's deceleration tail before anything else looks at
+        // it. Gain would multiply it, and the acceleration curve can only
+        // scale motion, never withhold it.
+        if dt > 0, !configuration.stopGate.allows(speed: millimetres.magnitude / dt) {
+            return
+        }
+
         var scale = configuration.gain
         if configuration.accelerationEnabled, dt > 0 {
             let speed = millimetres.magnitude / dt          // mm/s

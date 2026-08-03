@@ -14,14 +14,25 @@ func printUsage() {
 
     USAGE
       touchd                        run the driver
-      touchd --pointer-gain N       cursor px per mm (default 20)
+      touchd --pointer-gain N       cursor px per mm (default 24)
       touchd --scroll-gain N        scroll px per mm (default 32)
       touchd --friction N           per-tick friction (derived from --decay)
       touchd --flick N              mm/s release speed for momentum (default 2)
-      touchd --accel-max N          peak acceleration multiplier (default 3)
-      touchd --accel-curve N        knee sharpness, 1=soft (default 1.8)
-      touchd --accel-ref N          mm/s at the curve midpoint (default 150)
+      touchd --accel-max N          multiplier ceiling, fast movement (default 2)
+      touchd --accel-min N          multiplier floor, slow movement (default 0.9)
+      touchd --accel-curve N        steepness; <1 keeps the middle flat (0.6)
+      touchd --accel-ref N          mm/s where the multiplier is exactly 1 (150)
       touchd --no-accel             disable pointer acceleration
+
+    STOPPING (cutting the firmware's deceleration tail)
+      touchd --stop-speed N         mm/s below which a decaying move is tail (60)
+      touchd --arm-speed N          mm/s the finger must reach first (120)
+      touchd --no-stop-gate         let the tail through
+
+      Cursor glides on after you stop  → raise --stop-speed
+      Cursor stops while still moving  → lower --stop-speed, or --no-stop-gate
+      Cursor lands short of the target → the tail carries real displacement;
+                                         raise --lead rather than gating more
       touchd --decay N              momentum decay time constant (default 0.27s)
       touchd --no-momentum          disable inertial scrolling
       touchd --no-tap               disable tap-to-click
@@ -106,9 +117,13 @@ if args.contains("--no-momentum") { scrollConfig.momentumEnabled = false }
 var pointerConfig = PointerSynthesizer.Configuration()
 if let g = value("--pointer-gain") { pointerConfig.gain = g }
 if let a = value("--accel-max") { pointerConfig.maxAcceleration = a }
+if let a = value("--accel-min") { pointerConfig.minAcceleration = a }
 if let c = value("--accel-curve") { pointerConfig.accelerationCurve = c }
 if let r = value("--accel-ref") { pointerConfig.accelerationReference = r }
 if args.contains("--no-accel") { pointerConfig.accelerationEnabled = false }
+if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
+if let s = value("--arm-speed") { pointerConfig.stopGate.armSpeed = s }
+if args.contains("--no-stop-gate") { pointerConfig.stopGate.enabled = false }
 
 // Strip the pipeline back to raw delta x gain. Every transform below was
 // added to fix a specific symptom, and stacked they are hard to reason about;
@@ -116,6 +131,7 @@ if args.contains("--no-accel") { pointerConfig.accelerationEnabled = false }
 let minimal = args.contains("--minimal")
 if minimal {
     pointerConfig.accelerationEnabled = false
+    pointerConfig.stopGate.enabled = false
 }
 
 var smoothing = SmoothingConfiguration()
@@ -177,9 +193,12 @@ stage("1€ filter", smoothing.enabled,
       String(format: "cutoff %.2f Hz, beta %.3f, settle %.1f",
              smoothing.minCutoff, smoothing.beta, smoothing.settleGain))
 stage("acceleration", pointerConfig.accelerationEnabled,
-      String(format: "×%.1f, knee %.1f, ref %.0f mm/s",
-             pointerConfig.maxAcceleration, pointerConfig.accelerationCurve,
-             pointerConfig.accelerationReference))
+      String(format: "×%.2f–%.2f, curve %.2f, ref %.0f mm/s",
+             pointerConfig.minAcceleration, pointerConfig.maxAcceleration,
+             pointerConfig.accelerationCurve, pointerConfig.accelerationReference))
+stage("stop gate", pointerConfig.stopGate.enabled,
+      String(format: "cut below %.0f mm/s, armed above %.0f",
+             pointerConfig.stopGate.stopSpeed, pointerConfig.stopGate.armSpeed))
 print(String(format: "              → %@%.0f px/mm",
              "gain                ", pointerConfig.gain))
 print("              → CGEventPost")

@@ -55,6 +55,31 @@ let factor = min(maxAcceleration,
 
 `accelerationCurve` default moved 1.8 → 1.2. **Not yet tried on hardware.**
 
+## Where it actually landed
+
+The acceleration floor was tried and **rejected on feel**: at 0.2 it attenuated
+the whole aiming range, reported as "too slow at low speeds, too fast at high".
+The exponent was the real culprit — above 1 the curve is convex, leaving the
+floor early and reaching the ceiling late. Defaults are now gain 24, floor 0.9,
+ceiling 2.0, curve 0.6, which is flat to ~126 mm/s and then rises.
+
+That means **attenuation is no longer suppressing the tail** — the floor at 0.9
+passes it at near-full gain, and the ~0.1s glide came back, as expected.
+
+The tail is now handled by `TouchEvents/StopGate.swift` instead, which drops it
+rather than scaling it. It fires only when the finger was fast (armed above
+120 mm/s), is decaying (2 consecutive frames), and has fallen below 60 mm/s;
+any re-acceleration reopens it.
+
+**The trade-off, measured:** the tail is the firmware's IIR *catching up*, not
+phantom motion. At a≈0.28 the filter lags ~16.7 ms, so the tail carries real
+displacement — 6.7 mm at 400 mm/s. Gating it cuts the glide from ~100 ms to
+~32 ms but leaves the cursor that much short of where the finger pointed.
+
+Lead compensation is the complement: it moves the same displacement *earlier*
+rather than dropping it, and a test already pins that it preserves total
+displacement. Gate for the stop, `--lead` for the accuracy.
+
 ## Next steps
 
 1. Try the new curve. A slow tail (~10 mm/s) should now be attenuated to
