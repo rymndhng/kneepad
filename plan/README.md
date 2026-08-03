@@ -352,6 +352,48 @@ Not done: code signing and notarization. Only needed if this is ever shared.
 | **Reclaiming the interface** | macOS may grab digitizer reports once they start flowing. | `kIOHIDOptionsTypeSeizeDevice`. Stage 1 will tell us. |
 | **Mode persistence** | Input Mode likely resets on unplug/replug or firmware flash. | Re-arm on IOHIDManager device-matching callbacks. |
 | **Cursor regression** | Flipping to PTP mode kills the working mouse path before Stage 3 lands. | Keep a kill switch that restores Input Mode 0; don't run the daemon at login until Stage 3 is solid. |
+| **Descriptor misreports the surface** | Claims 55 mm across a sensor measuring ~25 mm, so every millimetre downstream is inflated ~2.2×. Undetectable from inside the pipeline — it stays self-consistent, so tuning by feel converges on numbers whose units are wrong. | `--surface N` corrects it and rescales the mm-denominated defaults. Bake in once measured — see Open TODOs. |
+
+---
+
+## Open TODOs
+
+### Bake in the true surface size
+
+**Status:** mechanism built (`--surface N`), correct value not yet established.
+
+The descriptor claims 55 × 55 mm; the sensor measures roughly 25 mm across.
+Until this is settled, every millimetre-denominated default in the project is
+inflated by ~2.2× and none of the flags mean what they say.
+
+1. **Measure the active area properly** — edge to edge of the sensor, not the
+   bezel. Everything else scales off this one number, so an eyeball estimate is
+   not good enough to hardcode.
+   Better than a ruler: drag one finger corner to corner and read the extremes
+   from `hid-stream --trace`. That gives the span the firmware actually reports
+   over, in its own units, with no parallax.
+2. **Confirm it is square.** X and Y declare identical ranges, which is what
+   makes the current numbers symmetric. If the sensor is not square, `--surface`
+   needs a second axis rather than one scalar.
+3. **Then fold it into the defaults** and delete the flag — a permanent property
+   of the hardware does not belong in a runtime option. The constants to move
+   are listed in the `--surface` block in `touchd/main.swift`; speeds and
+   lengths scale with the surface, gains inversely, and the 1€ filter's `beta`
+   and `settleGain` carry inverse-millimetre units.
+4. **Re-check the stop gate afterwards.** `--arm-speed 120` currently arms at
+   ~55 mm/s of real hand movement, so it fires far more readily than designed.
+   Correcting the scale without re-tuning will make it noticeably less eager.
+
+Worth reporting upstream to ZSA once confirmed: if the descriptor's Physical
+Maximum is boilerplate, every PTP consumer of this firmware inherits the error.
+
+### Also outstanding
+
+- `touchd --stats` jitter lines are wrong — they pool samples across different
+  resting positions rather than measuring spread at one spot. See
+  `FEEL-DEBUGGING.md`.
+- Stage 5 (pinch / rotate) parked by agreement; recon notes below.
+- LaunchAgent written and syntax-checked but never installed.
 
 ---
 
