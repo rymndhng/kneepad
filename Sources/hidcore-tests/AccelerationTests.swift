@@ -41,12 +41,18 @@ func runAccelerationTests() {
             }
         }
 
-        TestRunner.test("the flat region runs well past casual pointing") {
-            // Where the power law finally overtakes the floor.
+        // Where the power law finally overtakes the floor. This is a band, not
+        // a floor: too narrow and the cursor accelerates while you are still
+        // aiming; too wide and short strokes — vertical ones especially, since
+        // a finger flexes over much less distance than it sweeps — never leave
+        // the flat zone and the pad feels like hard work.
+        TestRunner.test("the flat region covers aiming but not much more") {
             let knee = config.accelerationReference
                 * pow(config.minAcceleration, 1 / config.accelerationCurve)
-            check(knee > 100,
-                  "flat only up to \(Int(knee)) mm/s — amplification starts too early")
+            check(knee > 60,
+                  "flat only to \(Int(knee)) mm/s — amplification starts mid-aim")
+            check(knee < 140,
+                  "flat to \(Int(knee)) mm/s — short strokes never get amplified")
         }
 
         TestRunner.test("the floor attenuates without deadening") {

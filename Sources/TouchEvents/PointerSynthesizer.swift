@@ -31,10 +31,17 @@ public final class PointerSynthesizer {
         /// `gain` applies literally.
         ///
         /// Together with the floor this sets where the flat region ends —
-        /// `reference × floor^(1/curve)`, currently ~163 mm/s. That flat span
+        /// `reference × floor^(1/curve)`, currently ~107 mm/s. That flat span
         /// is the part that has to cover ordinary aiming; raising the
-        /// reference widens it.
-        public var accelerationReference = 260.0
+        /// reference widens it, lowering it brings acceleration in earlier.
+        ///
+        /// Lowered from 260 because short strokes needed too much effort. A
+        /// wide flat zone means a stroke has to be genuinely fast before it is
+        /// amplified at all, and vertical strokes rarely are — the finger has
+        /// far less range flexing than sweeping sideways, so up-and-down
+        /// movement sat inside the flat zone almost always. Shrinking the zone
+        /// helps every direction, and vertical most.
+        public var accelerationReference = 170.0
 
         /// Curve steepness past the knee. Higher climbs to the ceiling faster.
         ///

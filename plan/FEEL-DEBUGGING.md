@@ -83,11 +83,24 @@ before adding the stage.
 ## Settled values
 
 ```
---pointer-gain 12 --accel-ref 260 --accel-min 0.6 --accel-max 3.2 --accel-curve 1.1
+--pointer-gain 12 --accel-ref 170 --accel-min 0.6 --accel-max 3.2 --accel-curve 1.1
 ```
 
 All found by hand. Note they are denominated in the descriptor's inflated
 millimetre — see the surface-calibration TODO in `README.md`.
+
+The reference moved 260 → 170 to shrink the flat zone from 163 to 107 mm/s.
+A wide flat zone means a stroke must be genuinely fast before it is amplified
+at all, and **vertical strokes rarely are**: a finger flexes over far less
+distance than it sweeps sideways, so up-and-down movement sat inside the flat
+zone almost always and the pad felt like hard work in that axis. The pad is
+square, the screen is not, which makes it worse — 2560 px across 25 mm needs
+102 px/mm to cross in one stroke, against Apple's 20, where the pad's aspect
+ratio nearly matches the screen's and uniform gain simply works.
+
+Shrinking the zone helps every direction and vertical most. An anisotropic
+vertical gain would target it more precisely, but it bends diagonals — a 45°
+finger movement stops producing 45° cursor movement — so it was not added.
 
 ## Pipeline
 
