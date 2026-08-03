@@ -49,45 +49,18 @@ func printUsage() {
       Cursor stops while still moving   → lower --stop-speed, or --no-stop-gate
 
       The gate cannot remove lag *during* movement — it only drops the tail
-      after it. The lag itself is the firmware's low-pass, and only --lead
-      (which inverts it) or new firmware can take that out.
+      after it. That lag is the firmware's own low-pass, and nothing in
+      userland removes it: lead compensation was tried and measured to do
+      nothing at any setting that did not also add visible noise.
 
-    SMOOTHING (1€ filter over contact positions)
-      touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
-      touchd --beta N               speed coupling; higher is snappier (0.25)
-      touchd --minimal              STRIP EVERYTHING: no filter, no lead, no
-                                    acceleration. Raw delta x gain, nothing else.
-                                    Start here when the feel is wrong.
-      touchd --lead N               cancel firmware smoothing (default 0.25, 0=off)
-      touchd --settle N             how hard a stop is snapped to (default 4)
-      touchd --deadband N           mm treated as noise, not lag (default 0.25)
-      touchd --filter               ENABLE the 1€ filter (off by default)
-      touchd --no-filter            disable it again
-      touchd --no-smoothing         disable it again (alias)
+    POSITIONS
+      touchd --minimal              strip the stop gate and acceleration too;
+                                    raw delta x gain, nothing else
 
-      The filter is OFF by default: this pad has no jitter worth
-      suppressing, and filtering an already-filtered signal only adds lag.
-      If you enable it, prefer --filter --settle 0 — the settle term
-      switches smoothing on and off as the error crosses --deadband, many
-      times a second, which reads as jerkiness.
-
-      Jittery cursor when still  → --filter, then lower --cutoff or --beta
-      Laggy when moving fast     → raise --beta, or turn the filter off
-
-      Tuning --lead: it inverts the firmware's low-pass, and the error is
-      asymmetric — too low leaves some drift after a stop but is otherwise
-      clean, while too high makes the cursor dart past the stop and snap
-      back. Raise it until that snap-back appears, then back off.
-
-      Inverting the measured decay would call for 2.5 or more, but in
-      practice 0.25 is where it settled: the stop gate already removes the
-      tail, and does it without lead's (1 + 2 x lead) noise amplification.
-      What is left for lead is a nudge against the lag *during* movement,
-      which the gate cannot reach. Treat large values with suspicion — the
-      arithmetic argues for them and the hardware does not.
-
-      The stages are independent. To isolate lead from the filter:
-        touchd --minimal --lead N
+      Contact positions are used exactly as the device reports them.
+      A 1€ filter and lead compensation both used to sit here; both were
+      measured to do nothing useful on this hardware and deleted. See
+      plan/README.md before adding either back.
 
       touchd --verbose              log recognised gestures
       touchd --stats                report rate and jitter measurements
@@ -158,32 +131,16 @@ if minimal {
     pointerConfig.stopGate.enabled = false
 }
 
-var smoothing = SmoothingConfiguration()
-if minimal {
-    smoothing.enabled = false     // 1€ filter off
-    smoothing.leadGain = 0        // lead compensation off
-}
-// Parsed after --minimal so a stage can be added back on its own, e.g.
-//   touchd --minimal --lead 2.5
-if args.contains("--filter") { smoothing.enabled = true }
-if args.contains("--no-filter") { smoothing.enabled = false }
-if let c = value("--cutoff") { smoothing.minCutoff = c }
-if let b = value("--beta") { smoothing.beta = b }
-if let l = value("--lead") { smoothing.leadGain = l }
-if let g = value("--settle") { smoothing.settleGain = g }
-if let d = value("--deadband") { smoothing.settleDeadband = d }
-if args.contains("--no-smoothing") { smoothing.enabled = false }
 
 // One switch for "make it stop when I stop".
 //
 // Purely a gate preset. It cannot cut the whole tail — a tail is only
 // recognisable once it has begun arriving — so some is always emitted.
 //
-// This deliberately does NOT raise --lead, which it used to, on the theory
-// that gate and lead attack the same lag from opposite sides. Tuning by hand
-// settled lead at 0.25, far below what inverting the firmware's decay implies,
-// which says the gate is doing the work and lead is only trimming. Overriding
-// a hand-tuned value with a model-derived one would trade drift for snap-back.
+// It used to also raise lead compensation, on the theory that the two attack
+// the same lag from opposite sides. Lead has since been deleted outright: at
+// the only setting that felt right it advanced motion by a quarter of a frame,
+// 1.6ms, while still amplifying noise. The gate does all of this work.
 if args.contains("--hard-stop") {
     pointerConfig.stopGate.makeAggressive()
     if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
@@ -234,7 +191,6 @@ if let trueWidth = value("--surface"),
 
     let p = PointerSynthesizer.Configuration()
     let s = ScrollSynthesizer.Configuration()
-    let m = SmoothingConfiguration()
     let r = PointerRecognizer()
 
     // px per mm — inverse.
@@ -257,7 +213,6 @@ if let trueWidth = value("--surface"),
     }
 
     // mm.
-    if smoothing.settleDeadband == m.settleDeadband { smoothing.settleDeadband *= scale }
     if pointerRecognizer.tapMaxTravel == r.tapMaxTravel {
         pointerRecognizer.tapMaxTravel *= scale
     }
@@ -267,11 +222,6 @@ if let trueWidth = value("--surface"),
     if pointerRecognizer.doubleTapMaxDistance == r.doubleTapMaxDistance {
         pointerRecognizer.doubleTapMaxDistance *= scale
     }
-
-    // The 1€ filter's beta and settle gain both multiply a speed to produce a
-    // cutoff frequency, so they carry inverse-millimetre units too.
-    if smoothing.beta == m.beta { smoothing.beta /= scale }
-    if smoothing.settleGain == m.settleGain { smoothing.settleGain /= scale }
 
     scrollRecognizerScale = scale
 
@@ -291,13 +241,6 @@ func stage(_ name: String, _ on: Bool, _ detail: String) {
         + (on ? detail : "off"))
 }
 print("Pipeline      raw report from device")
-// Independent of the 1€ filter — gating this on smoothing.enabled would
-// misreport the pipeline, which is exactly what this summary exists to prevent.
-stage("lead compensation", smoothing.leadGain > 0,
-      String(format: "gain %.1f", smoothing.leadGain))
-stage("1€ filter", smoothing.enabled,
-      String(format: "cutoff %.2f Hz, beta %.3f, settle %.1f",
-             smoothing.minCutoff, smoothing.beta, smoothing.settleGain))
 stage("acceleration", pointerConfig.accelerationEnabled,
       String(format: "×%.2f–%.2f, curve %.2f, ref %.0f mm/s",
              pointerConfig.minAcceleration, pointerConfig.maxAcceleration,
@@ -308,8 +251,7 @@ stage("stop gate", pointerConfig.stopGate.enabled,
 print(String(format: "              → %@%.0f px/mm",
              "gain                ", pointerConfig.gain))
 print("              → CGEventPost")
-if minimal && smoothing.leadGain == 0 && !smoothing.enabled
-    && !pointerConfig.accelerationEnabled {
+if minimal && !pointerConfig.stopGate.enabled && !pointerConfig.accelerationEnabled {
     print("              (--minimal: raw delta × gain only)")
 }
 print()
@@ -361,7 +303,6 @@ do {
 // MARK: - Pipeline
 
 let tracker = ContactTracker(layout: session.layout)
-tracker.smoothing = smoothing
 let scrollRecognizer = ScrollRecognizer()
 if scrollRecognizerScale != 1.0 {
     scrollRecognizer.activationDistance *= scrollRecognizerScale
@@ -496,8 +437,6 @@ session.onFrame = { frame, _ in
         // is the condition the filter is meant to clean up.
         if let raw = frame.contacts.first, frame.contacts.count == 1,
            let filtered = tracks.first, filtered.velocity.magnitude < 2.0 {
-            // Both in millimetres — frame.contacts is pre-smoothing, the track
-            // is post-smoothing, so this compares like with like.
             stats.stillRaw.append(raw.position)
             stats.stillFiltered.append(filtered.position)
             if stats.stillRaw.count > 2000 {

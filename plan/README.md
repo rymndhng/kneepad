@@ -356,6 +356,78 @@ Not done: code signing and notarization. Only needed if this is ever shared.
 
 ---
 
+## Deleted: the 1€ filter and lead compensation
+
+Both once sat between the device and the cursor. Both are gone. **Read this
+before adding either back** — each was added for a plausible reason, and each
+turned out to be measurably worthless on this hardware.
+
+### The 1€ filter
+
+A speed-adaptive low-pass over contact positions, plus a `settleGain` term of
+my own on top of the published design. Three findings, in increasing order of
+how much each should have prevented it being written:
+
+1. **There is no jitter to suppress.** The pad reports 2048 steps across its
+   width, so one step is 12–27 µm depending on which surface figure you trust.
+   At the slow-movement rate of ~7 px/mm that is under 0.2 px. Two steps of
+   sensor noise cannot move the cursor a whole pixel. The 1€ filter earns its
+   place when raw noise is large relative to output resolution — tracked
+   headsets, optical markers. Here it is two orders of magnitude below it.
+2. **The signal arrives already filtered.** The firmware low-passes position
+   before it reaches USB; that is the entire source of the deceleration tail.
+   Filtering a filtered signal removes no noise and adds delay.
+3. **The settle term was actively harmful.** It raised the cutoff by
+   `settleGain × excess / dt`, and at 154 Hz that `/dt` is enormous — a 0.06 mm
+   change in error swung alpha from 0.36 to 0.65. In motion the error crosses
+   the deadband constantly, so smoothing flickered on and off many times a
+   second. Reported as jerkiness. It had been added to fix the deceleration
+   lingering, a job `StopGate` later took over properly, leaving it redundant
+   as well as harmful.
+
+### Lead compensation
+
+The exact algebraic inverse of the firmware's IIR:
+`x[n] = y[n] + k·(y[n] − y[n−1])` with `k = (1−a)/a`.
+
+The theory is sound and the implementation was correct. It still did nothing,
+and the reason is worth keeping:
+
+- Inverting the measured decay (`r ≈ 0.72` → `a ≈ 0.28`) called for `k = 2.57`.
+- Every value above ~1 produced visible noise — the compensator is a
+  differentiator with gain `1 + 2k` — or overshoot, the cursor darting past a
+  stop and snapping back.
+- The only setting that felt right was `k = 0.25`, which advances motion by
+  **0.25 frames = 1.6 ms**. One frame at 154 Hz is 6.5 ms. It was doing nothing
+  perceptible while still amplifying noise 1.5×.
+
+Being off by 10× from an *exact inverse* is the tell: the model does not hold.
+The firmware is not a clean single pole, which the second trace already hinted
+at by refusing to fit. Recovering `a` from a decay ratio and inverting it looks
+rigorous and produces a number that hardware rejects.
+
+### What replaced them
+
+`TouchEvents/StopGate.swift`, which drops the deceleration tail instead of
+trying to invert it. It costs no noise amplification and no lag, because it
+withholds samples rather than transforming them. The pipeline is now:
+
+```
+device → stop gate → acceleration → gain → CGEventPost
+```
+
+Contact positions reach the recognizers exactly as reported.
+
+### The general lesson
+
+A filter is not free insurance. Four theories about this pad's feel were wrong
+before the right one, and three of the four were *additions* — a filter, a
+settle term, a compensator — each defended by arithmetic that was internally
+correct and empirically irrelevant. Before adding a stage, measure that the
+thing it targets is large enough to see in the output.
+
+---
+
 ## Open TODOs
 
 ### Bake in the true surface size
@@ -378,8 +450,7 @@ inflated by ~2.2× and none of the flags mean what they say.
 3. **Then fold it into the defaults** and delete the flag — a permanent property
    of the hardware does not belong in a runtime option. The constants to move
    are listed in the `--surface` block in `touchd/main.swift`; speeds and
-   lengths scale with the surface, gains inversely, and the 1€ filter's `beta`
-   and `settleGain` carry inverse-millimetre units.
+   lengths scale with the surface, gains inversely.
 4. **Re-check the stop gate afterwards.** `--arm-speed 120` currently arms at
    ~55 mm/s of real hand movement, so it fires far more readily than designed.
    Correcting the scale without re-tuning will make it noticeably less eager.

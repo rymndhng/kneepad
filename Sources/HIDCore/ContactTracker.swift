@@ -78,13 +78,6 @@ public final class ContactTracker {
     private var nextID = 0
     private var lastScanTime: Int?
 
-    /// Position smoothing. Raw capacitive positions jitter by a unit or two
-    /// even under a still finger, which reads as a twitchy cursor.
-    public var smoothing = SmoothingConfiguration()
-    private var filters: [Int: OneEuroPointFilter] = [:]
-    /// Previous *raw* position per contact, for lead compensation.
-    private var previousRaw: [Int: Point] = [:]
-
     private let scanTimeModulus: Int?
     private let secondsPerCount: Double?
 
@@ -130,8 +123,7 @@ public final class ContactTracker {
         var events: [TouchEvent] = []
         var seen = Set<Int>()
 
-        for raw in frame.contacts {
-            let contact = smooth(raw, dt: dt)
+        for contact in frame.contacts {
             seen.insert(contact.hardwareID)
             if var existing = tracks[contact.hardwareID] {
                 existing.advance(to: contact, dt: dt)
@@ -154,66 +146,12 @@ public final class ContactTracker {
         }
         for id in vanished {
             if let track = tracks.removeValue(forKey: id) { events.append(.ended(track)) }
-            // A recycled contact ID must not inherit the old finger's filter
-            // state, or the new touch starts by sliding in from the old spot.
-            filters.removeValue(forKey: id)
-            previousRaw.removeValue(forKey: id)
         }
         return events
     }
 
-    /// Apply per-contact position smoothing. Each contact keeps its own filter
-    /// so two fingers don't pollute each other's estimates.
-    private func smooth(_ contact: Contact, dt: Double) -> Contact {
-        guard dt > 0 else { return contact }
-
-        // Two independent stages, deliberately separable.
-        //
-        // Lead compensation cancels the deceleration tail present in the raw
-        // absolute stream; the 1€ filter removes sensor noise. They pull in
-        // opposite directions — lead sharpens the stop, and the filter, whose
-        // cutoff is lowest exactly when the finger is slowing, re-smooths it.
-        // Bundling them behind one switch made it impossible to tell which was
-        // responsible for anything.
-        var position = contact.position
-        if smoothing.leadGain > 0, let previous = previousRaw[contact.hardwareID] {
-            let delta = contact.position - previous
-            position = Point(x: contact.position.x + smoothing.leadGain * delta.x,
-                             y: contact.position.y + smoothing.leadGain * delta.y)
-        }
-        previousRaw[contact.hardwareID] = contact.position
-
-        guard smoothing.enabled else {
-            return Contact(hardwareID: contact.hardwareID,
-                           rawX: contact.rawX, rawY: contact.rawY,
-                           position: position, confident: contact.confident)
-        }
-
-        let filter: OneEuroPointFilter
-        if let existing = filters[contact.hardwareID] {
-            filter = existing
-        } else {
-            filter = OneEuroPointFilter(minCutoff: smoothing.minCutoff,
-                                        beta: smoothing.beta,
-                                        settleGain: smoothing.settleGain,
-                                        settleDeadband: smoothing.settleDeadband)
-            filters[contact.hardwareID] = filter
-        }
-        filter.minCutoff = smoothing.minCutoff
-        filter.beta = smoothing.beta
-        filter.settleGain = smoothing.settleGain
-        filter.settleDeadband = smoothing.settleDeadband
-
-        return Contact(hardwareID: contact.hardwareID,
-                       rawX: contact.rawX, rawY: contact.rawY,
-                       position: filter.filter(position, dt: dt),
-                       confident: contact.confident)
-    }
-
     public func reset() {
         tracks.removeAll()
-        filters.removeAll()
-        previousRaw.removeAll()
         lastScanTime = nil
         lastDelta = 0
     }
