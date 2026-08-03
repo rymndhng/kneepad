@@ -26,7 +26,7 @@ func printUsage() {
       touchd --no-momentum          disable inertial scrolling
       touchd --no-tap               disable tap-to-click
       touchd --no-right-tap         two-finger tap does not right click
-      touchd --two-tap-time N       two-finger tap max duration (default 0.4s)
+      touchd --two-tap-time N       two-finger tap max duration (default 0.6s)
       touchd --two-tap-travel N     two-finger tap max travel (default 4mm)
       touchd --reverse              invert scroll direction
 
@@ -184,7 +184,7 @@ print("Tap to click  \(tapEnabled ? "on" : "off")")
 // invited passing 500 back in, which parses as a 500-second window.
 print(String(format: "Two-finger    %@  (max %.2fs, %.1f mm)",
              rightTapEnabled ? "tap → right click" : "right click off",
-             twoTapTime ?? 0.4, twoTapTravel ?? 4.0))
+             twoTapTime ?? 0.6, twoTapTravel ?? 4.0))
 if dryRun { print("Dry run       recognising only, posting nothing") }
 print()
 

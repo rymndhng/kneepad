@@ -156,8 +156,8 @@ func runPointerRecognizerTests() {
             let h = Harness()
             let contacts = [contact(0, 20, 20), contact(1, 32, 20)]
             _ = h.step(contacts)
-            // 0.3s — past the one-finger limit, inside the two-finger one.
-            h.hold(contacts, frames: 29)
+            // 0.5s — well past the one-finger limit, inside the two-finger one.
+            h.hold(contacts, frames: 49)
             let result = taps(h.step([]))
 
             expectEqual(result.count, 1, "two fingers land and lift less crisply")
@@ -168,7 +168,7 @@ func runPointerRecognizerTests() {
             let h = Harness()
             let contacts = [contact(0, 20, 20), contact(1, 32, 20)]
             _ = h.step(contacts)
-            h.hold(contacts, frames: 60)          // 0.6s, past twoFingerTapMaxDuration
+            h.hold(contacts, frames: 100)         // 1.0s, well past the 0.6s limit
             expectEqual(taps(h.step([])).count, 0, "a rest is not a tap")
             check(h.recognizer.lastTapRejection != nil, "the reason must be reported")
         }

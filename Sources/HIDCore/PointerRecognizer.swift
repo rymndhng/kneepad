@@ -32,7 +32,7 @@ public final class PointerRecognizer {
     /// both fingers' timing slop, and the primary contact rolls further while
     /// the second finger arrives. Reusing the one-finger numbers rejected most
     /// real two-finger taps.
-    public var twoFingerTapMaxDuration = 0.4
+    public var twoFingerTapMaxDuration = 0.6
     public var twoFingerTapMaxTravel = 4.0
 
     /// Maximum gap between taps for the second to be a double.
