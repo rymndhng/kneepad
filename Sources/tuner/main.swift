@@ -473,6 +473,16 @@ final class LiveReadout: NSStackView {
     }
 }
 
+/// A clip view that puts the origin at the top left.
+///
+/// AppKit's default is bottom-left, so a document view shorter than the scroll
+/// view sits at the bottom of it — which is why the Taps and Scroll columns
+/// hung off the bottom of their tab. The Pointer tab hid the same bug simply
+/// by having more content than fits.
+final class FlippedClipView: NSClipView {
+    override var isFlipped: Bool { true }
+}
+
 // MARK: - Window
 
 final class TunerController: NSObject, NSWindowDelegate {
@@ -621,6 +631,7 @@ final class TunerController: NSObject, NSWindowDelegate {
             let scroll = NSScrollView()
             scroll.hasVerticalScroller = true
             scroll.drawsBackground = false
+            scroll.contentView = FlippedClipView()
             scroll.documentView = stack
             stack.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
@@ -670,11 +681,27 @@ final class TunerController: NSObject, NSWindowDelegate {
 
         // Two equal columns. Neither list is long enough to need the full
         // width, and side by side they fit without scrolling at all.
-        let gesturePanel = NSStackView(views: [scrolling(scrollControls),
-                                               scrolling(tapControls)])
-        gesturePanel.orientation = .horizontal
-        gesturePanel.distribution = .fillEqually
-        gesturePanel.spacing = 0
+        //
+        // Explicit constraints rather than a horizontal NSStackView: a scroll
+        // view has no intrinsic height, so a stack has nothing to align it by
+        // and the result depends on which alignment happens to be set.
+        let scrollColumn = scrolling(scrollControls)
+        let tapColumn = scrolling(tapControls)
+        let gesturePanel = NSView()
+        for column in [scrollColumn, tapColumn] {
+            column.translatesAutoresizingMaskIntoConstraints = false
+            gesturePanel.addSubview(column)
+            NSLayoutConstraint.activate([
+                column.topAnchor.constraint(equalTo: gesturePanel.topAnchor),
+                column.bottomAnchor.constraint(equalTo: gesturePanel.bottomAnchor),
+            ])
+        }
+        NSLayoutConstraint.activate([
+            scrollColumn.leadingAnchor.constraint(equalTo: gesturePanel.leadingAnchor),
+            scrollColumn.trailingAnchor.constraint(equalTo: tapColumn.leadingAnchor),
+            tapColumn.trailingAnchor.constraint(equalTo: gesturePanel.trailingAnchor),
+            scrollColumn.widthAnchor.constraint(equalTo: tapColumn.widthAnchor),
+        ])
 
         // A tab item resizes its view by autoresizing mask, so an autolayout
         // view dropped straight in has no size to lay out against. Wrapping it
