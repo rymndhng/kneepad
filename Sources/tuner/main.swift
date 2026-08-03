@@ -563,9 +563,15 @@ final class TunerController: NSObject, NSWindowDelegate {
     let window: NSWindow
 
     override init() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
+        // Tall enough that neither tab scrolls. The Pointer tab measures 612pt
+        // of controls and the tab bar and footer take about 78 more, so 730 leaves
+        // a little slack past the point where the scrollers stop — clamped to the
+        // screen, since a display shorter than that has the last word.
+        let wanted = min(730, (NSScreen.main?.visibleFrame.height ?? 730) - 60)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: wanted),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
+        window.minSize = NSSize(width: 720, height: 420)
         super.init()
 
         window.title = "teach-touch tuning"
