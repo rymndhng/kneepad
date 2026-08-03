@@ -29,7 +29,7 @@ final class CurveView: NSView {
     var trail: [Double] = []
 
     private let sMin = 3.0, sMax = 1000.0
-    private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 48, right: 26)
+    private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 36, right: 26)
 
     /// Colour for the live position and its trail.
     ///
@@ -85,11 +85,6 @@ final class CurveView: NSView {
                    width: x(min(knee, sMax)) - inset.left, height: h).fill()
         }
 
-        // Named marks sit on the axis, so a decade label too close to one is
-        // dropped rather than overprinted.
-        let named = tuning.accelEnabled
-            ? [tuning.accelPivot, tuning.accelerationKnee].filter { $0 > sMin && $0 < sMax }
-            : []
         NSColor.separatorColor.setStroke()
         for v in [10.0, 30, 100, 300, 1000] where v <= sMax {
             let path = NSBezierPath()
@@ -97,7 +92,6 @@ final class CurveView: NSView {
             path.line(to: NSPoint(x: x(v), y: inset.top + h))
             path.lineWidth = 1
             path.stroke()
-            guard !named.contains(where: { abs(x($0) - x(v)) < 24 }) else { continue }
             let text = NSAttributedString(string: "\(Int(v))", attributes: label)
             text.draw(at: NSPoint(x: x(v) - text.size().width / 2, y: inset.top + h + 4))
         }
@@ -115,65 +109,72 @@ final class CurveView: NSView {
             gy += step
         }
 
-        // Reference and knee, marked on the axes rather than explained in
-        // prose beside the sliders. The reference is the one landmark that does
-        // NOT move when the exponent changes — the curve pivots about it —
-        // which is only obvious when both are visible at once.
-        let axisLabel: [NSAttributedString.Key: Any] = [
+        // Pivot, knee and gain as dotted rules across the plot, each labelled
+        // along its own length. Text beside an axis has to be tied back to the
+        // line it names; text lying on the line needs no tying at all.
+        let guideLabel: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold),
             .foregroundColor: NSColor.labelColor,
         ]
 
-        func axisMark(_ speed: Double, _ caption: String, emphasis: Bool) {
-            guard speed > sMin, speed < sMax else { return }
-            let px = x(speed)
-            (emphasis ? NSColor.labelColor : NSColor.secondaryLabelColor).setStroke()
-            let tick = NSBezierPath()
-            tick.move(to: NSPoint(x: px, y: inset.top + h))
-            tick.line(to: NSPoint(x: px, y: inset.top + h + 5))
-            tick.lineWidth = emphasis ? 1.5 : 1
-            tick.stroke()
+        /// Text reading bottom-to-top, anchored at its lower end.
+        ///
+        /// The view is flipped, so this rotation composes with the flip AppKit
+        /// already applies to draw glyphs upright. Rotating by -90 and drawing
+        /// at negative height is what comes out the right way round — verified
+        /// by rendering a glyph both ways and comparing against a pixel
+        /// rotation, not by reasoning about it.
+        func drawUpward(_ text: NSAttributedString, x: CGFloat, bottom: CGFloat) {
+            NSGraphicsContext.saveGraphicsState()
+            let transform = NSAffineTransform()
+            transform.translateX(by: x, yBy: bottom)
+            transform.rotate(byDegrees: -90)
+            transform.concat()
+            text.draw(at: NSPoint(x: 0, y: -text.size().height))
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
-            // On their own row, below the decade labels, so neither collides.
-            let text = NSAttributedString(string: caption, attributes: axisLabel)
-            text.draw(at: NSPoint(x: px - text.size().width / 2, y: inset.top + h + 17))
+        func dotted(_ path: NSBezierPath, emphasis: Bool) {
+            (emphasis ? NSColor.labelColor : NSColor.secondaryLabelColor).setStroke()
+            path.lineWidth = emphasis ? 1.2 : 1
+            path.setLineDash([1.5, 3], count: 2, phase: 0)
+            path.stroke()
         }
 
         if tuning.accelEnabled {
-            // Guide lines to where each lands on the curve.
-            NSColor.separatorColor.setStroke()
-            for speed in [tuning.accelPivot, knee] where speed > sMin && speed < sMax {
-                let guideLine = NSBezierPath()
-                guideLine.move(to: NSPoint(x: x(speed), y: inset.top + h))
-                guideLine.line(to: NSPoint(x: x(speed),
-                                           y: y(tuning.pixelsPerMillimetre(atSpeed: speed))))
-                guideLine.lineWidth = 1
-                guideLine.setLineDash([2, 3], count: 2, phase: 0)
-                guideLine.stroke()
-            }
-
-            // A steep exponent pushes the knee up towards the reference. When
-            // the two labels would overprint, the knee keeps its tick and loses
-            // its text — the reference is the one that anchors the curve.
-            // "260 pivot" is wider than the "x1" it replaced, so the two
-            // labels start overlapping sooner.
-            let crowded = abs(x(knee) - x(tuning.accelPivot)) < 58
-            axisMark(knee, crowded ? "" : "\(Int(knee)) knee", emphasis: false)
-            axisMark(tuning.accelPivot, "\(Int(tuning.accelPivot)) pivot",
-                     emphasis: true)
-
-            // And the rate the reference produces, on the vertical axis.
+            // Horizontal: the rate below the knee, which is also where the
+            // curve crosses the pivot.
             let gainY = y(tuning.pointerGain)
-            NSColor.labelColor.setStroke()
-            let yTick = NSBezierPath()
-            yTick.move(to: NSPoint(x: inset.left, y: gainY))
-            yTick.line(to: NSPoint(x: inset.left - 5, y: gainY))
-            yTick.lineWidth = 1.5
-            yTick.stroke()
-            let gainText = NSAttributedString(
-                string: String(format: "%.0f", tuning.pointerGain), attributes: axisLabel)
-            gainText.draw(at: NSPoint(x: inset.left - gainText.size().width - 6,
-                                      y: gainY - gainText.size().height / 2))
+            let gainLine = NSBezierPath()
+            gainLine.move(to: NSPoint(x: inset.left, y: gainY))
+            gainLine.line(to: NSPoint(x: inset.left + w, y: gainY))
+            dotted(gainLine, emphasis: false)
+            NSAttributedString(string: String(format: "gain %.0f", tuning.pointerGain),
+                               attributes: guideLabel)
+                .draw(at: NSPoint(x: inset.left + 4, y: gainY - 12))
+
+            // Vertical: the knee, then the pivot over the top of it. Labels run
+            // up the line, starting clear of the x-axis.
+            let crowded = abs(x(knee) - x(tuning.accelPivot)) < 14
+            for (speed, caption, emphasis) in
+                [(knee, crowded ? "" : "knee \(Int(knee))", false),
+                 (tuning.accelPivot, "pivot \(Int(tuning.accelPivot))", true)]
+                where speed > sMin && speed < sMax {
+
+                let px = x(speed)
+                let line = NSBezierPath()
+                line.move(to: NSPoint(x: px, y: inset.top))
+                line.line(to: NSPoint(x: px, y: inset.top + h))
+                dotted(line, emphasis: emphasis)
+
+                guard !caption.isEmpty else { continue }
+                let text = NSAttributedString(string: caption, attributes: guideLabel)
+                // The rotated strip ends at `x`, so this sits it immediately
+                // left of the rule rather than floating away from it. Skipped
+                // entirely if the plot is too short to hold the whole word.
+                guard text.size().width + 12 < h else { continue }
+                drawUpward(text, x: px - 2, bottom: inset.top + h - 6)
+            }
         }
 
         let curve = NSBezierPath()
@@ -232,7 +233,7 @@ final class CurveView: NSView {
 
         let axis = NSAttributedString(string: "finger speed — mm/s, log scale", attributes: label)
         axis.draw(at: NSPoint(x: inset.left + (w - axis.size().width) / 2,
-                              y: inset.top + h + 32))
+                              y: inset.top + h + 19))
 
         // The vertical axis, named down the right-hand edge.
         //
