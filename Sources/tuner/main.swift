@@ -495,11 +495,21 @@ final class TunerController: NSObject, NSWindowDelegate {
         window.delegate = self
         window.center()
 
-        let controls = NSStackView()
-        controls.orientation = .vertical
-        controls.alignment = .leading
-        controls.spacing = 14
-        controls.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
+        // Two tabs. Pointer motion is what gets tuned repeatedly, in a tight
+        // loop against the plot; taps and scrolling are set once and left. One
+        // column holding all of it meant scrolling past the settled half to
+        // reach the half being worked on.
+        func makeStack() -> NSStackView {
+            let stack = NSStackView()
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 14
+            stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
+            return stack
+        }
+        let pointerControls = makeStack()
+        let gestureControls = makeStack()
+        var controls = pointerControls
 
         func heading(_ text: String) {
             let label = NSTextField(labelWithString: text.uppercased())
@@ -538,9 +548,14 @@ final class TunerController: NSObject, NSWindowDelegate {
             controls.addArrangedSubview(button)
         }
 
-        let legend = MarkerLegend()
-        controls.addArrangedSubview(legend)
-        legend.heightAnchor.constraint(equalToConstant: 12).isActive = true
+        // Each tab needs its own; the marks are meaningless without it and a
+        // tab is not guaranteed to have been opened in order.
+        func addLegend() {
+            let legend = MarkerLegend()
+            controls.addArrangedSubview(legend)
+            legend.heightAnchor.constraint(equalToConstant: 12).isActive = true
+        }
+        addLegend()
 
         heading("Pointer")
         toggle("accel", "Acceleration", { $0.accelEnabled }, { $0.accelEnabled = $1 })
@@ -572,6 +587,9 @@ final class TunerController: NSObject, NSWindowDelegate {
         slider("stop", "Cut below", "mm/s under which decaying motion is treated as tail",
                20...250, 0, { $0.stopSpeed }, { $0.stopSpeed = $1 })
 
+        controls = gestureControls
+        addLegend()
+
         heading("Scroll")
         slider("scroll", "Gain", "px per mm", 8...80, 0,
                { $0.scrollGain }, { $0.scrollGain = $1 })
@@ -597,24 +615,37 @@ final class TunerController: NSObject, NSWindowDelegate {
         slider("dbldist", "Double-tap distance", "mm", 1...20, 1,
                { $0.doubleTapDistance }, { $0.doubleTapDistance = $1 })
 
+        // One reset for both tabs, in the footer, so neither tab looks like it
+        // owns a button that resets the other's values too.
         let reset = NSButton(title: "Reset to defaults", target: nil, action: nil)
         reset.setAction { [weak self] in
             self?.tuning = Tuning()
             self?.reloadControls()
             self?.apply()
         }
-        controls.addArrangedSubview(reset)
 
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.documentView = controls
-        controls.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            controls.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-            controls.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-            controls.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-        ])
+        func scrolling(_ stack: NSStackView) -> NSScrollView {
+            let scroll = NSScrollView()
+            scroll.hasVerticalScroller = true
+            scroll.drawsBackground = false
+            scroll.documentView = stack
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            ])
+            return scroll
+        }
+
+        let tabs = NSTabView()
+        for (label, stack) in [("Pointer", pointerControls),
+                               ("Taps & Scroll", gestureControls)] {
+            let item = NSTabViewItem(identifier: label)
+            item.label = label
+            item.view = scrolling(stack)
+            tabs.addTabViewItem(item)
+        }
 
         startTelemetry()
 
@@ -622,7 +653,13 @@ final class TunerController: NSObject, NSWindowDelegate {
         status.textColor = .secondaryLabelColor
         status.stringValue = "touchd applies changes as you move a slider"
 
-        let right = NSStackView(views: [curve, readout, status])
+        let footer = NSStackView(views: [reset, NSView(), status])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.distribution = .fill
+        footer.setHuggingPriority(.defaultLow, for: .horizontal)
+
+        let right = NSStackView(views: [curve, readout, footer])
         right.orientation = .vertical
         right.alignment = .leading
         right.spacing = 8
@@ -630,11 +667,12 @@ final class TunerController: NSObject, NSWindowDelegate {
         curve.translatesAutoresizingMaskIntoConstraints = false
         curve.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
         readout.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
+        footer.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
 
         let split = NSSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
-        split.addArrangedSubview(scroll)
+        split.addArrangedSubview(tabs)
         split.addArrangedSubview(right)
 
         window.contentView = split
