@@ -40,7 +40,7 @@ func printUsage() {
       touch failed to qualify, then raise whichever limit it names.
 
     STOPPING (cutting the firmware's deceleration tail)
-      touchd --hard-stop            no deceleration: aggressive gate + lead
+      touchd --hard-stop            aggressive stop gate preset
       touchd --stop-speed N         mm/s below which a decaying move is tail (60)
       touchd --arm-speed N          mm/s the finger must reach first (120)
       touchd --no-stop-gate         let the tail through
@@ -58,7 +58,7 @@ func printUsage() {
       touchd --minimal              STRIP EVERYTHING: no filter, no lead, no
                                     acceleration. Raw delta x gain, nothing else.
                                     Start here when the feel is wrong.
-      touchd --lead N               cancel firmware smoothing (default 1.25, 0=off)
+      touchd --lead N               cancel firmware smoothing (default 0.25, 0=off)
       touchd --settle N             how hard a stop is snapped to (default 4)
       touchd --deadband N           mm treated as noise, not lag (default 0.25)
       touchd --no-filter            disable the 1€ filter, keep lead
@@ -67,16 +67,20 @@ func printUsage() {
       Jittery cursor when still  → lower --cutoff, or lower --beta
       Laggy when moving fast     → raise --beta
 
-      Tuning --lead: it inverts the firmware's low-pass, so there is one
-      correct value rather than a taste range, and the error is asymmetric.
-      Too low leaves some drift after a stop but is otherwise clean; too
-      high makes the cursor dart past the stop and snap back. Raise it in
-      0.25 steps until that snap-back appears, then back off one step.
-      Useful range is roughly 1 to 4; anything finer than 0.25 is below
-      what you can feel. It also amplifies noise by (1 + 2 x lead).
+      Tuning --lead: it inverts the firmware's low-pass, and the error is
+      asymmetric — too low leaves some drift after a stop but is otherwise
+      clean, while too high makes the cursor dart past the stop and snap
+      back. Raise it until that snap-back appears, then back off.
 
-      The stages are independent. To isolate the tail without the filter
-      fighting it:   touchd --minimal --lead 2.5
+      Inverting the measured decay would call for 2.5 or more, but in
+      practice 0.25 is where it settled: the stop gate already removes the
+      tail, and does it without lead's (1 + 2 x lead) noise amplification.
+      What is left for lead is a nudge against the lag *during* movement,
+      which the gate cannot reach. Treat large values with suspicion — the
+      arithmetic argues for them and the hardware does not.
+
+      The stages are independent. To isolate lead from the filter:
+        touchd --minimal --lead N
 
       touchd --verbose              log recognised gestures
       touchd --stats                report rate and jitter measurements
@@ -164,19 +168,18 @@ if args.contains("--no-smoothing") { smoothing.enabled = false }
 
 // One switch for "make it stop when I stop".
 //
-// The gate alone cannot do it: the tail is the firmware's filter discharging,
-// and by the time enough of it has arrived to be recognised, some has already
-// been emitted. Lead compensation attacks the same lag from the other side, by
-// inverting the filter so the motion arrives early instead of late. Together
-// the stop is close to immediate.
+// Purely a gate preset. It cannot cut the whole tail — a tail is only
+// recognisable once it has begun arriving — so some is always emitted.
+//
+// This deliberately does NOT raise --lead, which it used to, on the theory
+// that gate and lead attack the same lag from opposite sides. Tuning by hand
+// settled lead at 0.25, far below what inverting the firmware's decay implies,
+// which says the gate is doing the work and lead is only trimming. Overriding
+// a hand-tuned value with a model-derived one would trade drift for snap-back.
 if args.contains("--hard-stop") {
     pointerConfig.stopGate.makeAggressive()
     if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
     if let s = value("--arm-speed") { pointerConfig.stopGate.armSpeed = s }
-    // A modest bump, not the 2.57 a full inversion of the first trace implied.
-    // The default of 1.25 was found by feel, and overshooting the true value
-    // makes the cursor snap back — a worse artefact than the drift it removes.
-    if value("--lead") == nil { smoothing.leadGain = 1.75 }
 }
 
 // MARK: - Permissions

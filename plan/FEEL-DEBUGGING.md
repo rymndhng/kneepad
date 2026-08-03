@@ -80,6 +80,40 @@ Lead compensation is the complement: it moves the same displacement *earlier*
 rather than dropping it, and a test already pins that it preserves total
 displacement. Gate for the stop, `--lead` for the accuracy.
 
+## What tuning by hand settled, and what it says
+
+Final values, all found by feel on the hardware:
+
+```
+--pointer-gain 12 --accel-ref 260 --accel-min 0.6 --accel-max 3.2
+--accel-curve 1.1 --lead 0.25
+```
+
+Two of these contradict the model that produced them, and that is the
+interesting part.
+
+**`--lead 0.25`, against a derived 2.57.** Inverting the firmware's measured
+decay (`r ≈ 0.72` → `a ≈ 0.28`) calls for a lead gain of 2.57. A tenth of that
+is what actually feels right. Since lead is an exact algebraic inverse when the
+model holds, being off by 10× means **the model does not hold** — the firmware
+is not a clean single-pole IIR, and the decay ratio measured from one trace was
+not describing the whole mechanism. The second trace already hinted at this by
+refusing to fit.
+
+The practical consequence: `StopGate` is not a stopgap for a badly tuned lead.
+It is doing the work, and it does it without lead's `(1 + 2·gain)` noise
+amplification. Lead only trims the residual lag *during* movement, which the
+gate cannot reach because it acts only after a stop. Anyone re-deriving the
+"correct" lead from a decay ratio should know it was tried and rejected.
+
+**`--accel-curve 1.1`, against a claim that it had to be below 1.** See the
+commit history: the flat span is `reference × floor^(1/curve)`, set by the floor
+and reference, not the exponent.
+
+Four theories were wrong before these, and both corrections came from hands
+rather than arithmetic. The arithmetic was useful for building the mechanisms
+and useless for choosing their constants.
+
 ## Next steps
 
 1. Try the new curve. A slow tail (~10 mm/s) should now be attenuated to

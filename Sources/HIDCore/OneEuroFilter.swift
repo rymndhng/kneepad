@@ -158,18 +158,24 @@ public struct SmoothingConfiguration {
     /// but a second trace of the same gesture showed a shorter, less regular
     /// decay that a single IIR does not fit.
     ///
-    /// 1.25 was settled on by feel, and the asymmetry of the error makes that
-    /// meaningful: undershooting the true value leaves some tail but is
-    /// otherwise clean, while overshooting it produces overshoot — the cursor
-    /// darts past a stop and snaps back. Those are distinguishable sensations,
-    /// so a value chosen by raising it until overshoot appears brackets the
-    /// truth from below. It also implies a ≈ 0.44, well short of the 0.28 the
-    /// first trace suggested; either that trace was unrepresentative, or the
-    /// firmware is not a clean single pole and full inversion overcorrects the
-    /// part that is not first-order.
+    /// 0.25 was settled on by feel, and it is far below what inverting the
+    /// measured decay would call for — a ≈ 0.28 implied 2.57, and even the
+    /// most conservative reading of the traces implied over 1.
+    ///
+    /// Taking that seriously: if only a quarter of the modelled correction is
+    /// wanted, the tail this is meant to cancel is largely being handled
+    /// elsewhere. It is — `StopGate` drops it outright, and unlike this it
+    /// costs no noise amplification. What remains for lead is a small nudge
+    /// against the residual lag *during* movement, which the gate cannot touch
+    /// because it only acts after a stop.
+    ///
+    /// So the two are not redundant, but their balance is the opposite of what
+    /// the IIR model predicted: the gate does the work, and lead trims. Anyone
+    /// re-deriving the "correct" value from a decay ratio should know it was
+    /// tried and rejected by hand — see plan/FEEL-DEBUGGING.md.
     ///
     /// Set to 0 to disable.
-    public var leadGain = 1.25
+    public var leadGain = 0.25
     /// Hz. Lower is steadier at rest; too low and slow movement feels sticky.
     public var minCutoff = 1.2
     /// Speed coupling. Higher responds faster but passes more jitter.
