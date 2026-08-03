@@ -174,8 +174,9 @@ public final class PointerRecognizer {
         let maxTravel = fingers >= 2 ? twoFingerTapMaxTravel : tapMaxTravel
 
         guard sequence.duration <= maxDuration else {
-            lastTapRejection = String(format: "%d-finger touch held %.0f ms (max %.0f)",
-                                      fingers, sequence.duration * 1000, maxDuration * 1000)
+            // Seconds, because that is the unit --two-tap-time takes.
+            lastTapRejection = String(format: "%d-finger touch held %.2fs (max %.2fs)",
+                                      fingers, sequence.duration, maxDuration)
             return nil
         }
         guard sequence.travel <= maxTravel else {

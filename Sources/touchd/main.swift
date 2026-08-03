@@ -180,9 +180,11 @@ print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
              scrollConfig.naturalDirection ? "natural" : "reversed",
              scrollConfig.momentumDecayTime))
 print("Tap to click  \(tapEnabled ? "on" : "off")")
-print(String(format: "Two-finger    %@  (max %.0f ms, %.1f mm)",
+// Seconds, matching the unit --two-tap-time is given in. Printing ms here
+// invited passing 500 back in, which parses as a 500-second window.
+print(String(format: "Two-finger    %@  (max %.2fs, %.1f mm)",
              rightTapEnabled ? "tap → right click" : "right click off",
-             (twoTapTime ?? 0.4) * 1000, twoTapTravel ?? 4.0))
+             twoTapTime ?? 0.4, twoTapTravel ?? 4.0))
 if dryRun { print("Dry run       recognising only, posting nothing") }
 print()
 
