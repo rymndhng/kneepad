@@ -446,6 +446,11 @@ process to macOS — no Dock icon, no menu bar, and it cannot be focused
 properly. The bundle is what makes it a real app; copy it to `/Applications`
 to keep it.
 
+Sliders commit **on release**, not while dragging. A continuous slider fires on
+every tick of travel, and writing each one floods the watcher with reloads for
+values that were only passed through on the way to the intended one. The plot
+still tracks the knob live; only the file waits.
+
 Precedence is: built-in defaults, then the tuning file, then command-line flags.
 So a flag still wins for a one-off experiment, and `--no-live` ignores the file
 entirely.

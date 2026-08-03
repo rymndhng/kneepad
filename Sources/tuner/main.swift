@@ -111,10 +111,11 @@ final class SliderRow: NSStackView {
     private let slider = NSSlider()
     private let readout = NSTextField(labelWithString: "")
     private let decimals: Int
-    private let onChange: (Double) -> Void
+    /// `committed` is false while the knob is still under the mouse.
+    private let onChange: (Double, Bool) -> Void
 
     init(_ title: String, _ help: String, range: ClosedRange<Double>,
-         value: Double, decimals: Int, onChange: @escaping (Double) -> Void) {
+         value: Double, decimals: Int, onChange: @escaping (Double, Bool) -> Void) {
         self.decimals = decimals
         self.onChange = onChange
         super.init(frame: .zero)
@@ -163,7 +164,17 @@ final class SliderRow: NSStackView {
 
     @objc private func changed() {
         refresh()
-        onChange(slider.doubleValue)
+        // A continuous slider fires on every tick of travel. Writing the file
+        // each time floods touchd's watcher with reloads for values passed
+        // through on the way to the one that was meant, so only the final
+        // event commits.
+        //
+        // Anything that is not a drag is already final: keyboard arrows,
+        // accessibility, a click on the track. Treating "not a drag" as
+        // committed rather than testing for .leftMouseUp keeps those working.
+        let event = NSApp.currentEvent?.type
+        let dragging = event == .leftMouseDragged || event == .leftMouseDown
+        onChange(slider.doubleValue, !dragging)
     }
 
     private func refresh() {
@@ -210,10 +221,10 @@ final class TunerController: NSObject, NSWindowDelegate {
                     _ get: @escaping (Tuning) -> Double,
                     _ set: @escaping (inout Tuning, Double) -> Void) {
             let row = SliderRow(title, help, range: range, value: get(tuning),
-                                decimals: decimals) { [weak self] v in
+                                decimals: decimals) { [weak self] v, committed in
                 guard let self else { return }
                 set(&self.tuning, v)
-                self.apply()
+                self.apply(save: committed)
             }
             sliders[key] = row
             controls.addArrangedSubview(row)
@@ -324,7 +335,8 @@ final class TunerController: NSObject, NSWindowDelegate {
         window.contentView = split
         DispatchQueue.main.async { split.setPosition(400, ofDividerAt: 0) }
 
-        apply(save: false)
+        refreshDisplay()
+        installReleaseMonitor()
     }
 
     private func reloadControls() {
@@ -351,14 +363,59 @@ final class TunerController: NSObject, NSWindowDelegate {
         toggles["righttap"]?.state = tuning.rightTapEnabled ? .on : .off
     }
 
-    private func apply(save: Bool = true) {
+    /// Safety net for a drag that never delivers a final event — released
+    /// outside the window, or interrupted. Long enough that pausing mid-drag
+    /// does not itself cause a write.
+    private var idleWrite: Timer?
+
+    /// Set while a slider has moved but the value has not been written.
+    private var pending = false
+
+    /// Commit on the mouse-up that ends a drag.
+    ///
+    /// Not relying on the slider's own final action: whether a continuous
+    /// NSSlider sends one on release is not something to bet the responsiveness
+    /// of the whole panel on. Watching the event directly is unambiguous.
+    private func installReleaseMonitor() {
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
+            if self?.pending == true { self?.write() }
+            return event
+        }
+    }
+
+    /// Redraw only. Opening the panel must not rewrite the file — the values
+    /// on screen are the ones already in it.
+    private func refreshDisplay() {
         curve.tuning = tuning
         knee.stringValue = String(
             format: "flat to %.0f mm/s at %.1f px/mm, ceiling %.1f px/mm",
             tuning.accelerationKnee,
             tuning.pixelsPerMillimetre(atSpeed: 1),
             tuning.pixelsPerMillimetre(atSpeed: 10_000))
-        guard save else { return }
+    }
+
+    private func apply(save: Bool = true) {
+        // The plot always tracks the slider; only the file waits.
+        refreshDisplay()
+        idleWrite?.invalidate()
+        guard save else {
+            pending = true
+            status.stringValue = "Editing — release to apply"
+            status.textColor = .secondaryLabelColor
+            idleWrite = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) {
+                [weak self] _ in
+                guard self?.pending == true else { return }
+                self?.write()
+            }
+            return
+        }
+        write()
+    }
+
+    private func write() {
+        idleWrite?.invalidate()
+        idleWrite = nil
+        pending = false
         do {
             try tuning.save()
             status.stringValue = "Applied \(Date().formatted(date: .omitted, time: .standard))"
