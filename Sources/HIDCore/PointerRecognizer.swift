@@ -21,7 +21,7 @@ public enum PointerEvent {
 public final class PointerRecognizer {
 
     /// Longest a touch can last and still count as a tap.
-    public var tapMaxDuration = 0.4
+    public var tapMaxDuration = 0.5
     /// Furthest a finger can travel and still count as a tap.
     public var tapMaxTravel = 1.45
 

@@ -28,7 +28,7 @@ func printUsage() {
       touchd --no-momentum          disable inertial scrolling
       touchd --no-tap               disable tap-to-click
       touchd --no-right-tap         two-finger tap does not right click
-      touchd --tap-time N           tap max duration (default 0.4s)
+      touchd --tap-time N           tap max duration (default 0.5s)
       touchd --tap-travel N         tap max travel (default 1.45mm)
       touchd --two-tap-time N       two-finger tap max duration (default 0.6s)
       touchd --two-tap-travel N     two-finger tap max travel (default 2.9mm)

@@ -34,7 +34,7 @@ public struct Tuning: Codable, Equatable {
     // Taps
     public var tapEnabled = true
     public var rightTapEnabled = true
-    public var tapTime = 0.4
+    public var tapTime = 0.5
     public var tapTravel = 1.45
     public var twoTapTime = 0.6
     public var twoTapTravel = 2.9
