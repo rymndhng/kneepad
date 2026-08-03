@@ -110,6 +110,46 @@ func runStopGateTests() {
                   "a tail decreases every frame; noise does not")
         }
 
+        // --hard-stop. The default gate deliberately lets a few frames of tail
+        // through so it cannot clip a real deceleration; this trades that away.
+        TestRunner.test("the aggressive preset cuts the tail sooner") {
+            let speeds = swipeThenStop(peak: 400, tailFrames: 20)
+
+            var normal = StopGate()
+            var eager = StopGate()
+            eager.makeAggressive()
+
+            let normalFrames = run(speeds, &normal).dropFirst(12).filter { $0 }.count
+            let eagerFrames = run(speeds, &eager).dropFirst(12).filter { $0 }.count
+
+            check(eagerFrames < normalFrames,
+                  "aggressive let \(eagerFrames) through vs \(normalFrames)")
+            check(Double(eagerFrames) * frame < 0.02,
+                  String(format: "still %.0f ms of glide", Double(eagerFrames) * frame * 1000))
+        }
+
+        TestRunner.test("the aggressive preset arms on ordinary pointing speeds") {
+            // The default arms at 120 mm/s, so stopping from a moderate move
+            // never triggers it at all — which is why the tail was still
+            // visible after ordinary use rather than only after fast swipes.
+            var eager = StopGate()
+            eager.makeAggressive()
+            let passed = run(swipeThenStop(peak: 90, tailFrames: 12), &eager)
+            check(passed.suffix(6).allSatisfy { !$0 },
+                  "a stop from 90 mm/s must still be cut")
+        }
+
+        TestRunner.test("even the aggressive preset cannot cut the first frame") {
+            // Worth pinning, because it bounds what gating can ever achieve.
+            // The tail is only recognisable once it has started arriving, so
+            // some of it is always emitted. Removing the lag itself is lead
+            // compensation's job, not the gate's.
+            var eager = StopGate()
+            eager.makeAggressive()
+            let passed = run(swipeThenStop(peak: 400, tailFrames: 10), &eager)
+            check(passed[12], "the first tail frame is indistinguishable in the moment")
+        }
+
         TestRunner.test("disabling it passes everything through") {
             var gate = StopGate()
             gate.enabled = false

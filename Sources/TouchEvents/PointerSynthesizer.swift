@@ -107,13 +107,11 @@ public final class PointerSynthesizer {
         // Drop the firmware's deceleration tail before anything else looks at
         // it. Gain would multiply it, and the acceleration curve can only
         // scale motion, never withhold it.
-        if dt > 0, !configuration.stopGate.allows(speed: millimetres.magnitude / dt) {
-            return
-        }
+        let speed = dt > 0 ? millimetres.magnitude / dt : 0
+        if dt > 0, !configuration.stopGate.allows(speed: speed) { return }
 
         var scale = configuration.gain
         if configuration.accelerationEnabled, dt > 0 {
-            let speed = millimetres.magnitude / dt          // mm/s
             let ratio = speed / configuration.accelerationReference
 
             // A power curve through (1, 1), clamped at both ends. Crucially the

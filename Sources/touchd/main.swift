@@ -40,14 +40,17 @@ func printUsage() {
       touch failed to qualify, then raise whichever limit it names.
 
     STOPPING (cutting the firmware's deceleration tail)
+      touchd --hard-stop            no deceleration: aggressive gate + lead
       touchd --stop-speed N         mm/s below which a decaying move is tail (60)
       touchd --arm-speed N          mm/s the finger must reach first (120)
       touchd --no-stop-gate         let the tail through
 
-      Cursor glides on after you stop  → raise --stop-speed
-      Cursor stops while still moving  → lower --stop-speed, or --no-stop-gate
-      Cursor lands short of the target → the tail carries real displacement;
-                                         raise --lead rather than gating more
+      Cursor glides on after you stop   → --hard-stop, or raise --stop-speed
+      Cursor stops while still moving   → lower --stop-speed, or --no-stop-gate
+
+      The gate cannot remove lag *during* movement — it only drops the tail
+      after it. The lag itself is the firmware's low-pass, and only --lead
+      (which inverts it) or new firmware can take that out.
 
     SMOOTHING (1€ filter over contact positions)
       touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
@@ -153,6 +156,20 @@ if let l = value("--lead") { smoothing.leadGain = l }
 if let g = value("--settle") { smoothing.settleGain = g }
 if let d = value("--deadband") { smoothing.settleDeadband = d }
 if args.contains("--no-smoothing") { smoothing.enabled = false }
+
+// One switch for "make it stop when I stop".
+//
+// The gate alone cannot do it: the tail is the firmware's filter discharging,
+// and by the time enough of it has arrived to be recognised, some has already
+// been emitted. Lead compensation attacks the same lag from the other side, by
+// inverting the filter so the motion arrives early instead of late. Together
+// the stop is close to immediate.
+if args.contains("--hard-stop") {
+    pointerConfig.stopGate.makeAggressive()
+    if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
+    if let s = value("--arm-speed") { pointerConfig.stopGate.armSpeed = s }
+    if value("--lead") == nil { smoothing.leadGain = 2.5 }
+}
 
 // MARK: - Permissions
 

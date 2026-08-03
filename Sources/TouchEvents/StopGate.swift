@@ -99,4 +99,12 @@ public struct StopGate {
         lastSpeed = 0
         decelerating = 0
     }
+
+    /// Fire on the smallest hint of a stop, at the cost of clipping genuine
+    /// deceleration. For when a hard stop matters more than a smooth one.
+    public mutating func makeAggressive() {
+        armSpeed = 50
+        stopSpeed = 140
+        confirmFrames = 1
+    }
 }
