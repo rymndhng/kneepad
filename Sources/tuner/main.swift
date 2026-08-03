@@ -544,7 +544,6 @@ final class TunerController: NSObject, NSWindowDelegate {
     private let curve = CurveView()
     private let status = NSTextField(labelWithString: "")
     private let readout = LiveReadout()
-    private let knee = NSTextField(labelWithString: "")
     let window: NSWindow
 
     override init() {
@@ -621,10 +620,6 @@ final class TunerController: NSObject, NSWindowDelegate {
                60...400, 0, { $0.accelPivot }, { $0.accelPivot = $1 })
         slider("Curve", "", 0.4...2.5, 2,
                { $0.accelCurve }, { $0.accelCurve = $1 })
-
-        knee.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        knee.textColor = .secondaryLabelColor
-        controls.addArrangedSubview(knee)
 
         heading("Stopping")
         toggle("Cut the deceleration tail",
@@ -817,12 +812,9 @@ final class TunerController: NSObject, NSWindowDelegate {
     /// Redraw only. Opening the panel must not rewrite the file — the values
     /// on screen are the ones already in it.
     private func refreshDisplay() {
+        // Everything this used to spell out — the knee, the flat rate, the
+        // ceiling — is on the chart's axes now.
         curve.tuning = tuning
-        knee.stringValue = String(
-            format: "flat to %.0f mm/s at %.1f px/mm, ceiling %.1f px/mm",
-            tuning.accelerationKnee,
-            tuning.pixelsPerMillimetre(atSpeed: 1),
-            tuning.pixelsPerMillimetre(atSpeed: 10_000))
     }
 
     private func apply(save: Bool = true) {
