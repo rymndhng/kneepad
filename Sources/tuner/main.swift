@@ -29,7 +29,7 @@ final class CurveView: NSView {
     var trail: [Double] = []
 
     private let sMin = 3.0, sMax = 1000.0
-    private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 34, right: 12)
+    private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 48, right: 12)
 
     /// Colour for the live position and its trail.
     ///
@@ -83,10 +83,13 @@ final class CurveView: NSView {
             NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()
             NSRect(x: inset.left, y: inset.top,
                    width: x(min(knee, sMax)) - inset.left, height: h).fill()
-            NSAttributedString(string: "flat to \(Int(knee)) mm/s", attributes: label)
-                .draw(at: NSPoint(x: inset.left + 5, y: inset.top + 4))
         }
 
+        // Named marks sit on the axis, so a decade label too close to one is
+        // dropped rather than overprinted.
+        let named = tuning.accelEnabled
+            ? [tuning.accelReference, tuning.accelerationKnee].filter { $0 > sMin && $0 < sMax }
+            : []
         NSColor.separatorColor.setStroke()
         for v in [10.0, 30, 100, 300, 1000] where v <= sMax {
             let path = NSBezierPath()
@@ -94,6 +97,7 @@ final class CurveView: NSView {
             path.line(to: NSPoint(x: x(v), y: inset.top + h))
             path.lineWidth = 1
             path.stroke()
+            guard !named.contains(where: { abs(x($0) - x(v)) < 24 }) else { continue }
             let text = NSAttributedString(string: "\(Int(v))", attributes: label)
             text.draw(at: NSPoint(x: x(v) - text.size().width / 2, y: inset.top + h + 4))
         }
@@ -111,34 +115,63 @@ final class CurveView: NSView {
             gy += step
         }
 
-        // The reference speed, where the multiplier is exactly 1.
-        //
-        // Worth drawing because it is the one landmark that does NOT move when
-        // the curve exponent changes — the curve pivots about it. Without it on
-        // screen the only visible landmark is the knee, which does move, and
-        // dragging the curve slider looks like it is dragging the reference.
-        if tuning.accelEnabled, tuning.accelReference > sMin,
-           tuning.accelReference < sMax {
-            let pivot = NSPoint(x: x(tuning.accelReference), y: y(tuning.pointerGain))
-            NSColor.tertiaryLabelColor.setStroke()
-            let mark = NSBezierPath()
-            mark.move(to: NSPoint(x: pivot.x, y: inset.top + h))
-            mark.line(to: pivot)
-            mark.lineWidth = 1
-            mark.setLineDash([2, 3], count: 2, phase: 0)
-            mark.stroke()
+        // Reference and knee, marked on the axes rather than explained in
+        // prose beside the sliders. The reference is the one landmark that does
+        // NOT move when the exponent changes — the curve pivots about it —
+        // which is only obvious when both are visible at once.
+        let axisLabel: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+        ]
 
-            NSColor.secondaryLabelColor.setStroke()
-            let cross = NSBezierPath()
-            cross.move(to: NSPoint(x: pivot.x - 4, y: pivot.y))
-            cross.line(to: NSPoint(x: pivot.x + 4, y: pivot.y))
-            cross.move(to: NSPoint(x: pivot.x, y: pivot.y - 4))
-            cross.line(to: NSPoint(x: pivot.x, y: pivot.y + 4))
-            cross.lineWidth = 1.5
-            cross.stroke()
+        func axisMark(_ speed: Double, _ caption: String, emphasis: Bool) {
+            guard speed > sMin, speed < sMax else { return }
+            let px = x(speed)
+            (emphasis ? NSColor.labelColor : NSColor.secondaryLabelColor).setStroke()
+            let tick = NSBezierPath()
+            tick.move(to: NSPoint(x: px, y: inset.top + h))
+            tick.line(to: NSPoint(x: px, y: inset.top + h + 5))
+            tick.lineWidth = emphasis ? 1.5 : 1
+            tick.stroke()
 
-            NSAttributedString(string: "×1 pivot", attributes: label)
-                .draw(at: NSPoint(x: pivot.x + 7, y: pivot.y - 12))
+            // On their own row, below the decade labels, so neither collides.
+            let text = NSAttributedString(string: caption, attributes: axisLabel)
+            text.draw(at: NSPoint(x: px - text.size().width / 2, y: inset.top + h + 17))
+        }
+
+        if tuning.accelEnabled {
+            // Guide lines to where each lands on the curve.
+            NSColor.separatorColor.setStroke()
+            for speed in [tuning.accelReference, knee] where speed > sMin && speed < sMax {
+                let guideLine = NSBezierPath()
+                guideLine.move(to: NSPoint(x: x(speed), y: inset.top + h))
+                guideLine.line(to: NSPoint(x: x(speed),
+                                           y: y(tuning.pixelsPerMillimetre(atSpeed: speed))))
+                guideLine.lineWidth = 1
+                guideLine.setLineDash([2, 3], count: 2, phase: 0)
+                guideLine.stroke()
+            }
+
+            // A steep exponent pushes the knee up towards the reference. When
+            // the two labels would overprint, the knee keeps its tick and loses
+            // its text — the reference is the one that anchors the curve.
+            let crowded = abs(x(knee) - x(tuning.accelReference)) < 52
+            axisMark(knee, crowded ? "" : "\(Int(knee)) knee", emphasis: false)
+            axisMark(tuning.accelReference, "\(Int(tuning.accelReference)) ×1",
+                     emphasis: true)
+
+            // And the rate the reference produces, on the vertical axis.
+            let gainY = y(tuning.pointerGain)
+            NSColor.labelColor.setStroke()
+            let yTick = NSBezierPath()
+            yTick.move(to: NSPoint(x: inset.left, y: gainY))
+            yTick.line(to: NSPoint(x: inset.left - 5, y: gainY))
+            yTick.lineWidth = 1.5
+            yTick.stroke()
+            let gainText = NSAttributedString(
+                string: String(format: "%.0f", tuning.pointerGain), attributes: axisLabel)
+            gainText.draw(at: NSPoint(x: inset.left - gainText.size().width - 6,
+                                      y: gainY - gainText.size().height / 2))
         }
 
         let curve = NSBezierPath()
@@ -197,7 +230,7 @@ final class CurveView: NSView {
 
         let axis = NSAttributedString(string: "finger speed — mm/s, log scale", attributes: label)
         axis.draw(at: NSPoint(x: inset.left + (w - axis.size().width) / 2,
-                              y: inset.top + h + 17))
+                              y: inset.top + h + 32))
     }
 
     private func niceStep(_ max: Double) -> Double {
@@ -333,6 +366,7 @@ final class SliderRow: NSStackView {
         let caption = NSTextField(wrappingLabelWithString: help)
         caption.font = .systemFont(ofSize: 10)
         caption.textColor = .secondaryLabelColor
+        caption.isHidden = help.isEmpty
 
         markers.slider = slider
         markers.defaultValue = defaultValue
@@ -567,14 +601,9 @@ final class TunerController: NSObject, NSWindowDelegate {
                { $0.accelMin }, { $0.accelMin = $1 })
         slider("max", "Ceiling", "fast-movement multiplier — reach", 1...6, 1,
                { $0.accelMax }, { $0.accelMax = $1 })
-        slider("ref", "Reference",
-               "mm/s where the multiplier is exactly 1 — the point the curve "
-               + "pivots about. Lower shrinks the flat zone",
+        slider("ref", "Reference", "",
                60...400, 0, { $0.accelReference }, { $0.accelReference = $1 })
-        slider("curve", "Curve",
-               "steepness above the knee. The curve pivots about the reference, "
-               + "so this moves where the flat zone ends without moving the "
-               + "reference itself", 0.4...2.5, 2,
+        slider("curve", "Curve", "", 0.4...2.5, 2,
                { $0.accelCurve }, { $0.accelCurve = $1 })
 
         knee.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
