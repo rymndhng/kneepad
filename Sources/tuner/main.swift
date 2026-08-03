@@ -632,7 +632,7 @@ final class TunerController: NSObject, NSWindowDelegate {
 
         heading("Pointer")
         toggle("Acceleration", { $0.accelEnabled }, { $0.accelEnabled = $1 })
-        slider("Gain", "px per mm at the reference speed", 4...40, 0,
+        slider("Gain", "screen px per mm of finger travel, at the pivot speed", 4...40, 0,
                { $0.pointerGain }, { $0.pointerGain = $1 })
         slider("Floor", "slow-movement multiplier — precision", 0.1...1.5, 2,
                { $0.accelMin }, { $0.accelMin = $1 })
@@ -654,10 +654,10 @@ final class TunerController: NSObject, NSWindowDelegate {
         controls = scrollControls
 
         heading("Scroll")
-        slider("Gain", "px per mm", 8...80, 0,
+        slider("Gain", "screen px per mm of finger travel", 8...80, 0,
                { $0.scrollGain }, { $0.scrollGain = $1 })
-        slider("Momentum decay", "seconds", 0.05...0.8, 2,
-               { $0.scrollDecay }, { $0.scrollDecay = $1 })
+        slider("Momentum decay", "seconds for a flick to slow to a third",
+               0.05...0.8, 2, { $0.scrollDecay }, { $0.scrollDecay = $1 })
         toggle("Inertia", { $0.momentumEnabled }, { $0.momentumEnabled = $1 })
         toggle("Natural direction", { $0.naturalScroll }, { $0.naturalScroll = $1 })
 
@@ -667,18 +667,24 @@ final class TunerController: NSObject, NSWindowDelegate {
         toggle("Tap to click", { $0.tapEnabled }, { $0.tapEnabled = $1 })
         toggle("Two-finger tap right-clicks",
                { $0.rightTapEnabled }, { $0.rightTapEnabled = $1 })
-        slider("Tap time", "seconds", 0.1...1.0, 2,
-               { $0.tapTime }, { $0.tapTime = $1 })
-        slider("Tap travel", "mm", 0.5...8, 1,
-               { $0.tapTravel }, { $0.tapTravel = $1 })
-        slider("Two-finger time", "seconds", 0.1...1.2, 2,
-               { $0.twoTapTime }, { $0.twoTapTime = $1 })
-        slider("Two-finger travel", "mm", 0.5...12, 1,
-               { $0.twoTapTravel }, { $0.twoTapTravel = $1 })
-        slider("Double-tap gap", "seconds between taps, not counting the taps",
+        // Every one of these is a limit, and a bare "Tap time 0.50" reads
+        // just as easily as a minimum. The name says which way it cuts and the
+        // caption says what happens when you cross it.
+        slider("Tap held at most", "seconds — longer is a press, not a tap",
+               0.1...1.0, 2, { $0.tapTime }, { $0.tapTime = $1 })
+        slider("Tap moves at most", "mm — further is a drag, not a tap",
+               0.5...8, 1, { $0.tapTravel }, { $0.tapTravel = $1 })
+        slider("Two fingers held at most", "seconds — longer is a rest, not a tap",
+               0.1...1.2, 2, { $0.twoTapTime }, { $0.twoTapTime = $1 })
+        slider("Two fingers move at most", "mm — further is a scroll, not a tap",
+               0.5...12, 1, { $0.twoTapTravel }, { $0.twoTapTravel = $1 })
+        slider("Double-tap gap at most",
+               "seconds from one tap lifting to the next landing — longer and "
+               + "they stay two single clicks",
                0.1...1.0, 2, { $0.doubleTapTime }, { $0.doubleTapTime = $1 })
-        slider("Double-tap distance", "mm", 1...20, 1,
-               { $0.doubleTapDistance }, { $0.doubleTapDistance = $1 })
+        slider("Double-tap spread at most",
+               "mm apart — further and they stay two single clicks",
+               1...20, 1, { $0.doubleTapDistance }, { $0.doubleTapDistance = $1 })
 
         func scrolling(_ stack: NSStackView) -> NSScrollView {
             let scroll = NSScrollView()
