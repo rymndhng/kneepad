@@ -437,9 +437,15 @@ file and applies changes **without restarting**, so the loop is: move a slider,
 move your finger, feel the difference.
 
 ```
-swift run tuner        # in one terminal
-./.build/debug/touchd  # in another
+./scripts/build-app.sh          # builds build/Teach Touch Tuner.app
+open 'build/Teach Touch Tuner.app'
+./.build/debug/touchd           # in a terminal, alongside it
 ```
+
+`swift run tuner` also works, but a bare SwiftPM executable is a faceless
+process to macOS — no Dock icon, no menu bar, and it cannot be focused
+properly. The bundle is what makes it a real app; copy it to `/Applications`
+to keep it.
 
 Precedence is: built-in defaults, then the tuning file, then command-line flags.
 So a flag still wins for a one-off experiment, and `--no-live` ignores the file
