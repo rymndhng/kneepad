@@ -28,7 +28,7 @@ public enum SessionError: Error, CustomStringConvertible {
 public final class TouchSession {
     public let device: HIDDevice
     public let parsed: ParsedDescriptor
-    public let layout: TouchLayout
+    public var layout: TouchLayout
     public let inputModeReportID: UInt8
     public let inputModeBodyLength: Int
 

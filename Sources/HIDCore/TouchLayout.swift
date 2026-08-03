@@ -84,8 +84,27 @@ public struct TouchLayout {
 
     public var maxContacts: Int { contacts.count }
 
-    /// Surface extent in millimetres, from the axes' physical ranges.
+    /// Correction for a descriptor that misreports the sensor's physical size.
+    ///
+    /// The physical range in a report descriptor is a claim, not a measurement,
+    /// and PTP descriptors are widely copied between projects — so the value
+    /// can be inherited boilerplate rather than the pad in front of you. When
+    /// it is wrong every millimetre downstream is wrong by the same factor:
+    /// speeds, gains, tap travel limits, the lot. They stay self-consistent,
+    /// which is why tuning by feel still converges — on numbers whose units
+    /// are a lie.
+    ///
+    /// 1.0 trusts the descriptor. See `declaredSurfaceSize` for what it said.
+    public var positionScale: Double = 1.0
+
+    /// Surface extent in millimetres after `positionScale`, i.e. what the rest
+    /// of the pipeline will actually measure against.
     public var surfaceSize: Point? {
+        declaredSurfaceSize.map { Point(x: $0.x * positionScale, y: $0.y * positionScale) }
+    }
+
+    /// Surface extent exactly as the descriptor claims it.
+    public var declaredSurfaceSize: Point? {
         guard let x = contacts.first?.x, let y = contacts.first?.y,
               let w = millimetres(x, x.logicalMax), let h = millimetres(y, y.logicalMax)
         else { return nil }
@@ -100,8 +119,8 @@ public struct TouchLayout {
             let rawX = slot.x.map { extract($0, from: body) } ?? 0
             let rawY = slot.y.map { extract($0, from: body) } ?? 0
             let position = Point(
-                x: slot.x.flatMap { millimetres($0, rawX) } ?? Double(rawX),
-                y: slot.y.flatMap { millimetres($0, rawY) } ?? Double(rawY))
+                x: (slot.x.flatMap { millimetres($0, rawX) } ?? Double(rawX)) * positionScale,
+                y: (slot.y.flatMap { millimetres($0, rawY) } ?? Double(rawY)) * positionScale)
             found.append(Contact(
                 hardwareID: slot.contactID.map { extract($0, from: body) } ?? found.count,
                 rawX: rawX, rawY: rawY,

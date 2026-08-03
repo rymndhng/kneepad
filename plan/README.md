@@ -207,6 +207,15 @@ everything mouse mode did, so the pad stays usable while it runs.
   duration coupled the two settings: once `tapMaxDuration` reached
   `doubleTapInterval`, a tap held for its full budget could never pair, so
   raising `--tap-time` silently made double clicks harder.
+- **The descriptor's 55 × 55 mm surface is not true.** The sensor measures
+  about 25 mm across, so every millimetre the pipeline reports is inflated
+  ~2.2×. The descriptor states Logical Max 2048, Physical Max 550, Unit
+  Exponent 0x0E (−2), Unit 0x11 (SI linear, cm) → 5.5 cm; PTP descriptors are
+  widely copied between projects, so this is very likely inherited boilerplate
+  rather than a measurement. `--surface N` corrects it and rescales the
+  millimetre-denominated defaults with it. Everything was self-consistent
+  before, which is why tuning by feel still converged — on numbers whose units
+  were wrong.
 - **Two-finger taps are judged on their own, looser budget** (≤0.6 s, ≤4 mm).
   The sequence spans the first touchdown to the last liftoff, so it absorbs
   both fingers' timing slop; the one-finger numbers rejected most real ones.
