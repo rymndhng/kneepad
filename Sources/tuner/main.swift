@@ -185,6 +185,88 @@ final class CurveView: NSView {
 
 // MARK: - Controls
 
+/// Reference marks above a slider: where the shipped default sits, and where
+/// the value stood when the panel opened.
+///
+/// Tuning by feel drifts. Without these there is no way to answer "is this
+/// actually better than where I started, or have I just been moving things",
+/// which is the question that matters after ten minutes of adjustment.
+final class SliderMarkers: NSView {
+    weak var slider: NSSlider?
+    var defaultValue = 0.0
+    var launchValue = 0.0
+
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 7) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let slider, slider.maxValue > slider.minValue else { return }
+
+        // Match the track's geometry: a slider reserves half a knob at each end,
+        // so a naive 0…width mapping puts every mark slightly off.
+        let knob = (slider.cell as? NSSliderCell)?.knobRect(flipped: false).width ?? 18
+        let usable = bounds.width - knob
+        func x(_ value: Double) -> CGFloat {
+            let fraction = (value - slider.minValue) / (slider.maxValue - slider.minValue)
+            return knob / 2 + CGFloat(min(max(fraction, 0), 1)) * usable
+        }
+
+        func triangle(at centre: CGFloat) -> NSBezierPath {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: centre, y: 0))
+            path.line(to: NSPoint(x: centre - 3.5, y: 6))
+            path.line(to: NSPoint(x: centre + 3.5, y: 6))
+            path.close()
+            return path
+        }
+
+        let sameSpot = abs(defaultValue - launchValue) < 1e-9
+
+        // Default: hollow, so it reads as a reference rather than a value.
+        let defaultMark = triangle(at: x(defaultValue))
+        NSColor.tertiaryLabelColor.setStroke()
+        defaultMark.lineWidth = 1
+        defaultMark.stroke()
+
+        // Launch: filled. Drawn second so it wins where the two coincide.
+        if !sameSpot {
+            NSColor.secondaryLabelColor.withAlphaComponent(0.75).setFill()
+            triangle(at: x(launchValue)).fill()
+        }
+    }
+}
+
+/// Explains the marks once, rather than every slider carrying a caption.
+final class MarkerLegend: NSView {
+    override var intrinsicContentSize: NSSize { NSSize(width: 220, height: 12) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        func triangle(at centre: CGFloat) -> NSBezierPath {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: centre, y: 2))
+            path.line(to: NSPoint(x: centre - 3.5, y: 8))
+            path.line(to: NSPoint(x: centre + 3.5, y: 8))
+            path.close()
+            return path
+        }
+        let text: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
+
+        let hollow = triangle(at: 4)
+        NSColor.tertiaryLabelColor.setStroke()
+        hollow.lineWidth = 1
+        hollow.stroke()
+        NSAttributedString(string: "default", attributes: text)
+            .draw(at: NSPoint(x: 12, y: 0))
+
+        NSColor.secondaryLabelColor.withAlphaComponent(0.75).setFill()
+        triangle(at: 66).fill()
+        NSAttributedString(string: "at launch", attributes: text)
+            .draw(at: NSPoint(x: 74, y: 0))
+    }
+}
+
 final class SliderRow: NSStackView {
     private let slider = NSSlider()
     private let readout = NSTextField(labelWithString: "")
@@ -192,8 +274,11 @@ final class SliderRow: NSStackView {
     /// `committed` is false while the knob is still under the mouse.
     private let onChange: (Double, Bool) -> Void
 
+    private let markers = SliderMarkers()
+
     init(_ title: String, _ help: String, range: ClosedRange<Double>,
-         value: Double, decimals: Int, onChange: @escaping (Double, Bool) -> Void) {
+         value: Double, defaultValue: Double, decimals: Int,
+         onChange: @escaping (Double, Bool) -> Void) {
         self.decimals = decimals
         self.onChange = onChange
         super.init(frame: .zero)
@@ -224,10 +309,19 @@ final class SliderRow: NSStackView {
         caption.font = .systemFont(ofSize: 10)
         caption.textColor = .secondaryLabelColor
 
+        markers.slider = slider
+        markers.defaultValue = defaultValue
+        markers.launchValue = value
+        markers.toolTip = String(format: "default %.2f · at launch %.2f",
+                                 defaultValue, value)
+
         addArrangedSubview(header)
+        addArrangedSubview(markers)
         addArrangedSubview(slider)
         addArrangedSubview(caption)
         header.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        markers.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        markers.heightAnchor.constraint(equalToConstant: 7).isActive = true
         slider.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
         caption.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
         refresh()
@@ -299,6 +393,7 @@ final class TunerController: NSObject, NSWindowDelegate {
                     _ get: @escaping (Tuning) -> Double,
                     _ set: @escaping (inout Tuning, Double) -> Void) {
             let row = SliderRow(title, help, range: range, value: get(tuning),
+                                defaultValue: get(Tuning()),
                                 decimals: decimals) { [weak self] v, committed in
                 guard let self else { return }
                 set(&self.tuning, v)
@@ -322,6 +417,10 @@ final class TunerController: NSObject, NSWindowDelegate {
             toggles[key] = button
             controls.addArrangedSubview(button)
         }
+
+        let legend = MarkerLegend()
+        controls.addArrangedSubview(legend)
+        legend.heightAnchor.constraint(equalToConstant: 12).isActive = true
 
         heading("Pointer")
         toggle("accel", "Acceleration", { $0.accelEnabled }, { $0.accelEnabled = $1 })
