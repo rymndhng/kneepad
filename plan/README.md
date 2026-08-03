@@ -202,6 +202,11 @@ everything mouse mode did, so the pad stays usable while it runs.
   so a second finger landing doesn't yank the pointer.
 - Tap to click (≤0.4 s, ≤2 mm travel), two-finger tap for right click,
   double-tap pairing by time *and* distance.
+- **The double-tap window is the gap between taps**, first liftoff to second
+  touchdown — not the span between liftoffs. Including the second tap's own
+  duration coupled the two settings: once `tapMaxDuration` reached
+  `doubleTapInterval`, a tap held for its full budget could never pair, so
+  raising `--tap-time` silently made double clicks harder.
 - **Two-finger taps are judged on their own, looser budget** (≤0.6 s, ≤4 mm).
   The sequence spans the first touchdown to the last liftoff, so it absorbs
   both fingers' timing slop; the one-finger numbers rejected most real ones.

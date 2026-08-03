@@ -30,6 +30,8 @@ func printUsage() {
       touchd --tap-travel N         tap max travel (default 2mm)
       touchd --two-tap-time N       two-finger tap max duration (default 0.6s)
       touchd --two-tap-travel N     two-finger tap max travel (default 4mm)
+      touchd --double-tap-time N    max gap between paired taps (default 0.4s)
+      touchd --double-tap-dist N    how far apart paired taps may land (8mm)
       touchd --reverse              invert scroll direction
 
       Two-finger tap not registering? Run --verbose; it prints why each
@@ -88,6 +90,8 @@ if let t = value("--tap-time") { pointerRecognizer.tapMaxDuration = t }
 if let d = value("--tap-travel") { pointerRecognizer.tapMaxTravel = d }
 if let t = value("--two-tap-time") { pointerRecognizer.twoFingerTapMaxDuration = t }
 if let d = value("--two-tap-travel") { pointerRecognizer.twoFingerTapMaxTravel = d }
+if let t = value("--double-tap-time") { pointerRecognizer.doubleTapInterval = t }
+if let d = value("--double-tap-dist") { pointerRecognizer.doubleTapMaxDistance = d }
 
 let showStats = args.contains("--stats")
 
@@ -199,6 +203,9 @@ if tapEnabled {
                               pointerRecognizer.twoFingerTapMaxDuration,
                               pointerRecognizer.twoFingerTapMaxTravel)
                      : "right click off"))
+    print(String(format: "Double click  within %.2fs of the last tap lifting, %.1f mm",
+                 pointerRecognizer.doubleTapInterval,
+                 pointerRecognizer.doubleTapMaxDistance))
 } else {
     print("Tap to click  off")
 }

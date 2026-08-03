@@ -207,6 +207,38 @@ func runPointerRecognizerTests() {
             expectEqual(result.first?.1, 2, "second tap pairs into a double")
         }
 
+        // The window is the gap between taps, not the span between liftoffs.
+        // Charging the second tap's own duration against it meant that once
+        // tapMaxDuration reached doubleTapInterval, a tap held for the full
+        // budget could never pair — so raising --tap-time silently made double
+        // clicks harder to land.
+        TestRunner.test("a slow second tap still pairs into a double") {
+            let h = Harness()
+            h.recognizer.tapMaxDuration = 0.4
+            h.recognizer.doubleTapInterval = 0.4
+
+            _ = h.step([contact(0, 20, 20)])
+            _ = taps(h.step([]))                       // first tap
+            h.hold([], frames: 15)                     // 0.15s gap, well inside
+
+            // Second tap is leisurely: 0.3s down, inside its own budget.
+            _ = h.step([contact(0, 20.5, 20.5)])
+            h.hold([contact(0, 20.5, 20.5)], frames: 29)
+            let result = taps(h.step([]))
+
+            expectEqual(result.first?.1, 2,
+                        "the tap's own duration must not count against the gap")
+        }
+
+        TestRunner.test("a long gap between taps still does not pair") {
+            let h = Harness()
+            _ = h.step([contact(0, 20, 20)])
+            _ = taps(h.step([]))
+            h.hold([], frames: 50)                     // 0.5s gap, past the window
+            _ = h.step([contact(0, 20, 20)])
+            expectEqual(taps(h.step([])).first?.1, 1, "a real gap must still break pairing")
+        }
+
         TestRunner.test("taps far apart do not pair") {
             let h = Harness()
             _ = h.step([contact(0, 20, 20)])

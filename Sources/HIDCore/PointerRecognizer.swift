@@ -35,7 +35,9 @@ public final class PointerRecognizer {
     public var twoFingerTapMaxDuration = 0.6
     public var twoFingerTapMaxTravel = 4.0
 
-    /// Maximum gap between taps for the second to be a double.
+    /// Maximum gap between taps for the second to be a double — measured from
+    /// the first tap lifting to the second finger landing, so it is
+    /// independent of how long either tap itself takes.
     public var doubleTapInterval = 0.4
     /// How far apart two taps can land and still pair up.
     public var doubleTapMaxDistance = 8.0
@@ -188,9 +190,19 @@ public final class PointerRecognizer {
         lastTapRejection = nil
 
         // Only left taps pair into double clicks.
+        //
+        // The window is the gap between the taps — from the first liftoff to
+        // the second touchdown. `timeSinceLastTap` runs from the first liftoff
+        // to *now*, which is the second liftoff, so the second tap's own
+        // duration has to come back out. Leaving it in charged the tap against
+        // the window it was trying to land in: once tapMaxDuration reached
+        // doubleTapInterval, a tap held for the full budget could never pair,
+        // and raising --tap-time silently made double clicks harder.
+        let gap = timeSinceLastTap - sequence.duration
+
         var count = 1
         if button == .left,
-           timeSinceLastTap <= doubleTapInterval,
+           gap <= doubleTapInterval,
            let previous = lastTapPosition,
            (position - previous).magnitude <= doubleTapMaxDistance {
             count = lastTapCount + 1
