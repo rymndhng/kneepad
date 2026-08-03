@@ -49,20 +49,25 @@ func runAccelerationTests() {
                   "flat only up to \(Int(knee)) mm/s — amplification starts too early")
         }
 
-        TestRunner.test("the flat rate is close to linear, not attenuated") {
-            // The floor exists to take the edge off the sensor's deceleration
-            // tail. Pushed lower it also swallows deliberate fine positioning,
-            // which is exactly how 0.2 felt.
-            check(config.minAcceleration >= 0.8,
+        TestRunner.test("the floor attenuates without deadening") {
+            // Tuned by hand, between two failures either side: at 0.2 the
+            // attenuation swallowed deliberate fine positioning and the pad
+            // felt sluggish; at 1.0 nothing is attenuated at all.
+            check(config.minAcceleration > 0.4,
                   "a floor of \(config.minAcceleration) makes fine placement sluggish")
             check(config.minAcceleration < 1.0,
                   "at 1.0 nothing is attenuated and the tail arrives at full gain")
         }
 
-        TestRunner.test("fast movement is amplified, but not thrown") {
-            let fast = factor(600, config)
-            check(fast > 1.3, "a flick must cover ground, got ×\(fast)")
-            check(fast <= 2.5, "×\(fast) overshoots — the cursor outruns the hand")
+        TestRunner.test("a flick covers meaningfully more ground than aiming") {
+            // The pad is small, so crossing a screen needs real amplification.
+            // What matters is the ratio between the two ends, not either alone.
+            let range = config.maxAcceleration / config.minAcceleration
+            check(range >= 3,
+                  "only ×\(range) between slowest and fastest — too little range "
+                  + "to both aim and cross the screen on a pad this size")
+            check(factor(600, config) > 2,
+                  "a fast flick must reach well up the curve")
         }
 
         TestRunner.test("the multiplier never leaves its bounds") {
@@ -83,14 +88,20 @@ func runAccelerationTests() {
             }
         }
 
-        TestRunner.test("a sub-1 curve exponent is what keeps the middle flat") {
-            // Above 1 the curve is convex: it leaves the floor early and
-            // reaches the ceiling late, so slow motion is attenuated across the
-            // aiming range and fast motion keeps accelerating. That was the
-            // 1.2 default, and it read as too slow when placing the cursor and
-            // too fast when crossing the screen.
-            check(config.accelerationCurve < 1.0,
-                  "curve \(config.accelerationCurve) reintroduces the convex shape")
+        // This suite briefly asserted that the exponent had to be below 1 to
+        // keep the middle flat. Tuning by hand disproved it: the shipped curve
+        // is 1.1 and the flat span is wider than it was at 0.6. The flat span
+        // is set by the floor and the reference speed —
+        // `reference × floor^(1/curve)` — and the exponent only shapes what
+        // happens above the knee. The test that survives is the one that
+        // measures the flat span directly, above.
+        TestRunner.test("the knee is where the floor and the power law meet") {
+            let knee = config.accelerationReference
+                * pow(config.minAcceleration, 1 / config.accelerationCurve)
+            expectClose(factor(knee, config), config.minAcceleration, 0.001,
+                        "the curve must leave the floor exactly at the knee")
+            check(factor(knee * 1.5, config) > config.minAcceleration,
+                  "and must be climbing past it")
         }
     }
 }

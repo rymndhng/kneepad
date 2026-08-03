@@ -14,25 +14,15 @@ func printUsage() {
 
     USAGE
       touchd                        run the driver
-      touchd --pointer-gain N       cursor px per mm (default 24)
+      touchd --pointer-gain N       cursor px per mm (default 12)
       touchd --scroll-gain N        scroll px per mm (default 32)
       touchd --friction N           per-tick friction (derived from --decay)
       touchd --flick N              mm/s release speed for momentum (default 2)
-      touchd --accel-max N          multiplier ceiling, fast movement (default 2)
-      touchd --accel-min N          multiplier floor, slow movement (default 0.9)
-      touchd --accel-curve N        steepness; <1 keeps the middle flat (0.6)
-      touchd --accel-ref N          mm/s where the multiplier is exactly 1 (150)
+      touchd --accel-max N          multiplier ceiling, fast movement (default 3.2)
+      touchd --accel-min N          multiplier floor, slow movement (default 0.6)
+      touchd --accel-curve N        steepness above the knee (default 1.1)
+      touchd --accel-ref N          mm/s where the multiplier is exactly 1 (260)
       touchd --no-accel             disable pointer acceleration
-
-    STOPPING (cutting the firmware's deceleration tail)
-      touchd --stop-speed N         mm/s below which a decaying move is tail (60)
-      touchd --arm-speed N          mm/s the finger must reach first (120)
-      touchd --no-stop-gate         let the tail through
-
-      Cursor glides on after you stop  → raise --stop-speed
-      Cursor stops while still moving  → lower --stop-speed, or --no-stop-gate
-      Cursor lands short of the target → the tail carries real displacement;
-                                         raise --lead rather than gating more
       touchd --decay N              momentum decay time constant (default 0.27s)
       touchd --no-momentum          disable inertial scrolling
       touchd --no-tap               disable tap-to-click
@@ -48,6 +38,16 @@ func printUsage() {
 
       Two-finger tap not registering? Run --verbose; it prints why each
       touch failed to qualify, then raise whichever limit it names.
+
+    STOPPING (cutting the firmware's deceleration tail)
+      touchd --stop-speed N         mm/s below which a decaying move is tail (60)
+      touchd --arm-speed N          mm/s the finger must reach first (120)
+      touchd --no-stop-gate         let the tail through
+
+      Cursor glides on after you stop  → raise --stop-speed
+      Cursor stops while still moving  → lower --stop-speed, or --no-stop-gate
+      Cursor lands short of the target → the tail carries real displacement;
+                                         raise --lead rather than gating more
 
     SMOOTHING (1€ filter over contact positions)
       touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
