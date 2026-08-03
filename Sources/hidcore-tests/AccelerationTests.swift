@@ -33,7 +33,7 @@ func runAccelerationTests() {
         // Linear here means a *constant* px/mm, so the cursor tracks the finger
         // proportionally and the hand can aim.
         TestRunner.test("low and medium speeds share one constant rate") {
-            let rates = [10.0, 25, 60, 100].map { pxPerMm($0, config) }
+            let rates = [8.0, 18, 45, 70].map { pxPerMm($0, config) }
             for rate in rates {
                 expectClose(rate, rates[0], 0.001,
                             "the whole aiming range must be one flat rate")
@@ -47,9 +47,9 @@ func runAccelerationTests() {
         // the flat zone and the pad feels like hard work.
         TestRunner.test("the flat region covers aiming but not much more") {
             let knee = config.accelerationKnee
-            check(knee > 60,
+            check(knee > 45,
                   "flat only to \(Int(knee)) mm/s — amplification starts mid-aim")
-            check(knee < 140,
+            check(knee < 110,
                   "flat to \(Int(knee)) mm/s — short strokes never get amplified")
         }
 
@@ -70,7 +70,7 @@ func runAccelerationTests() {
             check(range >= 3,
                   "only ×\(range) between slowest and fastest — too little range "
                   + "to both aim and cross the screen on a pad this size")
-            check(factor(600, config) > 2,
+            check(factor(440, config) > 2,
                   "a fast flick must reach well up the curve")
         }
 

@@ -34,7 +34,7 @@ func printUsage() {
       touchd --two-tap-travel N     two-finger tap max travel (default 4mm)
       touchd --double-tap-time N    max gap between paired taps (default 0.4s)
       touchd --double-tap-dist N    how far apart paired taps may land (8mm)
-      touchd --surface N            true pad width in mm, if the descriptor lies
+      touchd --surface N            override the measured 40mm pad width
       touchd --no-live              ignore the tuning file; use flags only
       touchd --reverse              invert scroll direction
 
@@ -108,10 +108,6 @@ if let d = value("--double-tap-dist") { pointerRecognizer.doubleTapMaxDistance =
 
 let showStats = args.contains("--stats")
 
-/// Set by `--surface`; the scroll recognizer is built later and its own
-/// millimetre thresholds have to move with the corrected scale too.
-var scrollRecognizerScale = 1.0
-
 var scrollConfig = ScrollSynthesizer.Configuration()
 liveTuning?.apply(to: &scrollConfig)
 if let g = value("--scroll-gain") { scrollConfig.gain = g }
@@ -184,60 +180,16 @@ do {
 
 // MARK: - Surface calibration
 //
-// The descriptor's physical range is a claim, not a measurement — PTP
-// descriptors get copied between projects, so it can be inherited boilerplate.
-// When it is wrong, every millimetre downstream is wrong by the same factor.
-// Everything stays self-consistent, which is why tuning by feel still
-// converges; it converges on numbers whose units are a lie.
-//
-// Correcting it rescales positions, so the defaults — all tuned against the
-// old scale — have to move with it or the feel changes. Speeds and lengths
-// scale with the surface; gains, being px per mm, scale inversely. A value the
-// user set explicitly is left alone, detected by it still differing from the
-// pristine default.
+// The descriptor's claimed surface is corrected at discovery — see
+// ZSA.measuredSurfaceWidthMM. Every threshold below is therefore denominated
+// in real millimetres, and this flag only exists for a unit whose sensor is a
+// different size. Nothing else needs rescaling: the defaults are already in
+// true millimetres, so correcting the scale is all it takes.
 if let trueWidth = value("--surface"),
    let declared = session.layout.declaredSurfaceSize, declared.x > 0 {
-    let scale = trueWidth / declared.x
-    session.layout.positionScale = scale
-
-    let p = PointerSynthesizer.Configuration()
-    let s = ScrollSynthesizer.Configuration()
-    let r = PointerRecognizer()
-
-    // px per mm — inverse.
-    if pointerConfig.gain == p.gain { pointerConfig.gain /= scale }
-    if scrollConfig.gain == s.gain { scrollConfig.gain /= scale }
-
-    // mm/s.
-    if pointerConfig.accelerationReference == p.accelerationReference {
-        pointerConfig.accelerationReference *= scale
-    }
-    if pointerConfig.stopGate.armSpeed == p.stopGate.armSpeed {
-        pointerConfig.stopGate.armSpeed *= scale
-    }
-    if pointerConfig.stopGate.stopSpeed == p.stopGate.stopSpeed {
-        pointerConfig.stopGate.stopSpeed *= scale
-    }
-    pointerConfig.stopGate.reawakenDelta *= scale
-    if scrollConfig.momentumThreshold == s.momentumThreshold {
-        scrollConfig.momentumThreshold *= scale
-    }
-
-    // mm.
-    if pointerRecognizer.tapMaxTravel == r.tapMaxTravel {
-        pointerRecognizer.tapMaxTravel *= scale
-    }
-    if pointerRecognizer.twoFingerTapMaxTravel == r.twoFingerTapMaxTravel {
-        pointerRecognizer.twoFingerTapMaxTravel *= scale
-    }
-    if pointerRecognizer.doubleTapMaxDistance == r.doubleTapMaxDistance {
-        pointerRecognizer.doubleTapMaxDistance *= scale
-    }
-
-    scrollRecognizerScale = scale
-
-    print(String(format: "Calibration   descriptor claims %.0f mm, measured %.0f mm → ×%.3f",
-                 declared.x, trueWidth, scale))
+    session.layout.positionScale = trueWidth / declared.x
+    print(String(format: "Calibration   overriding %.0f mm with %.0f mm",
+                 ZSA.measuredSurfaceWidthMM, trueWidth))
 }
 
 print("Device        \(session.device.info.summary)")
@@ -315,10 +267,6 @@ do {
 
 let tracker = ContactTracker(layout: session.layout)
 let scrollRecognizer = ScrollRecognizer()
-if scrollRecognizerScale != 1.0 {
-    scrollRecognizer.activationDistance *= scrollRecognizerScale
-    scrollRecognizer.stopFrameTravel *= scrollRecognizerScale
-}
 let scrollSynthesizer = ScrollSynthesizer(configuration: scrollConfig)
 let pointerSynthesizer = PointerSynthesizer(configuration: pointerConfig)
 

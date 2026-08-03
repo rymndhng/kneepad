@@ -200,23 +200,22 @@ everything mouse mode did, so the pad stays usable while it runs.
 
 - One finger moves the cursor; the **primary contact is the oldest one down**,
   so a second finger landing doesn't yank the pointer.
-- Tap to click (≤0.4 s, ≤2 mm travel), two-finger tap for right click,
+- Tap to click (≤0.4 s, ≤1.45 mm travel), two-finger tap for right click,
   double-tap pairing by time *and* distance.
 - **The double-tap window is the gap between taps**, first liftoff to second
   touchdown — not the span between liftoffs. Including the second tap's own
   duration coupled the two settings: once `tapMaxDuration` reached
   `doubleTapInterval`, a tap held for its full budget could never pair, so
   raising `--tap-time` silently made double clicks harder.
-- **The descriptor's 55 × 55 mm surface is not true.** The sensor measures
-  about 25 mm across, so every millimetre the pipeline reports is inflated
-  ~2.2×. The descriptor states Logical Max 2048, Physical Max 550, Unit
-  Exponent 0x0E (−2), Unit 0x11 (SI linear, cm) → 5.5 cm; PTP descriptors are
-  widely copied between projects, so this is very likely inherited boilerplate
-  rather than a measurement. `--surface N` corrects it and rescales the
-  millimetre-denominated defaults with it. Everything was self-consistent
-  before, which is why tuning by feel still converged — on numbers whose units
-  were wrong.
-- **Two-finger taps are judged on their own, looser budget** (≤0.6 s, ≤4 mm).
+- **The descriptor's 55 × 55 mm surface is not true; the sensor is 40 × 40.**
+  The descriptor states Logical Max 2048, Physical Max 550, Unit Exponent 0x0E
+  (−2), Unit 0x11 (SI linear, cm) → 5.5 cm. PTP descriptors are widely copied
+  between projects, so this is very likely inherited boilerplate. Corrected at
+  discovery (`ZSA.measuredSurfaceWidthMM`), so every threshold in the project is
+  in real millimetres. Before that correction everything was self-consistent but
+  inflated 1.375×, which is why tuning by feel still converged — on numbers
+  whose units were wrong.
+- **Two-finger taps are judged on their own, looser budget** (≤0.6 s, ≤2.9 mm).
   The sequence spans the first touchdown to the last liftoff, so it absorbs
   both fingers' timing slop; the one-finger numbers rejected most real ones.
 - **Fingers are counted over the whole sequence, not per frame.** At ~154 Hz
@@ -352,7 +351,7 @@ Not done: code signing and notarization. Only needed if this is ever shared.
 | **Reclaiming the interface** | macOS may grab digitizer reports once they start flowing. | `kIOHIDOptionsTypeSeizeDevice`. Stage 1 will tell us. |
 | **Mode persistence** | Input Mode likely resets on unplug/replug or firmware flash. | Re-arm on IOHIDManager device-matching callbacks. |
 | **Cursor regression** | Flipping to PTP mode kills the working mouse path before Stage 3 lands. | Keep a kill switch that restores Input Mode 0; don't run the daemon at login until Stage 3 is solid. |
-| **Descriptor misreports the surface** | Claims 55 mm across a sensor measuring ~25 mm, so every millimetre downstream is inflated ~2.2×. Undetectable from inside the pipeline — it stays self-consistent, so tuning by feel converges on numbers whose units are wrong. | `--surface N` corrects it and rescales the mm-denominated defaults. Bake in once measured — see Open TODOs. |
+| **Descriptor misreports the surface** | Claims 55 mm across a sensor measuring 40 mm, inflating every millimetre downstream by 1.375×. Undetectable from inside the pipeline — it stays self-consistent, so tuning by feel converges on numbers whose units are wrong. | Fixed: corrected at discovery via `ZSA.measuredSurfaceWidthMM`, constants rescaled once. `--surface` overrides it for a different unit. |
 
 ---
 
@@ -464,33 +463,20 @@ Two notes on the build:
 
 ## Open TODOs
 
-### Bake in the true surface size
+### ~~Bake in the true surface size~~ — done
 
-**Status:** mechanism built (`--surface N`), correct value not yet established.
+The sensor measures **40 × 40 mm**; the descriptor claims 55 × 55. Corrected at
+discovery via `ZSA.measuredSurfaceWidthMM`, and every millimetre-denominated
+constant was rescaled once so the feel is unchanged and the units are now real:
+speeds and lengths by 40/55, gains by 55/40. Verified numerically — the same
+physical gesture produces the same pixel travel to within rounding.
 
-The descriptor claims 55 × 55 mm; the sensor measures roughly 25 mm across.
-Until this is settled, every millimetre-denominated default in the project is
-inflated by ~2.2× and none of the flags mean what they say.
+`--surface N` survives only as an override for a unit whose sensor differs.
+Nothing else needs rescaling now: the defaults are in true millimetres, so
+correcting the scale is the whole job.
 
-1. **Measure the active area properly** — edge to edge of the sensor, not the
-   bezel. Everything else scales off this one number, so an eyeball estimate is
-   not good enough to hardcode.
-   Better than a ruler: drag one finger corner to corner and read the extremes
-   from `hid-stream --trace`. That gives the span the firmware actually reports
-   over, in its own units, with no parallax.
-2. **Confirm it is square.** X and Y declare identical ranges, which is what
-   makes the current numbers symmetric. If the sensor is not square, `--surface`
-   needs a second axis rather than one scalar.
-3. **Then fold it into the defaults** and delete the flag — a permanent property
-   of the hardware does not belong in a runtime option. The constants to move
-   are listed in the `--surface` block in `touchd/main.swift`; speeds and
-   lengths scale with the surface, gains inversely.
-4. **Re-check the stop gate afterwards.** `--arm-speed 120` currently arms at
-   ~55 mm/s of real hand movement, so it fires far more readily than designed.
-   Correcting the scale without re-tuning will make it noticeably less eager.
-
-Worth reporting upstream to ZSA once confirmed: if the descriptor's Physical
-Maximum is boilerplate, every PTP consumer of this firmware inherits the error.
+Still worth reporting to ZSA: if that Physical Maximum is copied boilerplate,
+every PTP consumer of this firmware inherits the same 1.375× error.
 
 ### Also outstanding
 

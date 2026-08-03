@@ -71,7 +71,14 @@ public final class TouchSession {
                                             kind: .feature).first
         else { throw SessionError.noInputMode }
 
-        guard let layout = discoverTouchLayout(parsed) else { throw SessionError.noTouchLayout }
+        guard var layout = discoverTouchLayout(parsed) else { throw SessionError.noTouchLayout }
+
+        // Correct the descriptor's overstated surface. See
+        // ZSA.measuredSurfaceWidthMM — without this, every millimetre the rest
+        // of the project reasons about is inflated by 1.375x.
+        if let declared = layout.declaredSurfaceSize, declared.x > 0 {
+            layout.positionScale = ZSA.measuredSurfaceWidthMM / declared.x
+        }
 
         let bodyLength = parsed.report(id: inputMode.reportID, kind: .feature)?.byteLength ?? 1
         return TouchSession(device: device, parsed: parsed, layout: layout,

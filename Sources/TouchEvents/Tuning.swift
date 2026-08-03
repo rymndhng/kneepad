@@ -13,20 +13,20 @@ import HIDCore
 public struct Tuning: Codable, Equatable {
 
     // Pointer
-    public var pointerGain = 12.0
+    public var pointerGain = 16.5
     public var accelEnabled = true
     public var accelMin = 0.6
     public var accelMax = 3.2
     public var accelCurve = 1.1
-    public var accelReference = 170.0
+    public var accelReference = 124.0
 
     // Stopping
     public var stopGateEnabled = true
-    public var armSpeed = 120.0
-    public var stopSpeed = 60.0
+    public var armSpeed = 87.0
+    public var stopSpeed = 44.0
 
     // Scroll
-    public var scrollGain = 32.0
+    public var scrollGain = 44.0
     public var scrollDecay = 0.27
     public var naturalScroll = true
     public var momentumEnabled = true
@@ -35,11 +35,11 @@ public struct Tuning: Codable, Equatable {
     public var tapEnabled = true
     public var rightTapEnabled = true
     public var tapTime = 0.4
-    public var tapTravel = 2.0
+    public var tapTravel = 1.45
     public var twoTapTime = 0.6
-    public var twoTapTravel = 4.0
+    public var twoTapTravel = 2.9
     public var doubleTapTime = 0.4
-    public var doubleTapDistance = 8.0
+    public var doubleTapDistance = 5.8
 
     /// True pad width in mm, if the descriptor's claim is wrong. Nil trusts it.
     public var surfaceWidth: Double?

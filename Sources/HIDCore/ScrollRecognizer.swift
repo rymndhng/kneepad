@@ -23,7 +23,7 @@ public final class ScrollRecognizer {
 
     /// Millimetres the centroid must travel before scrolling engages. Prevents
     /// a two-finger rest from nudging the view.
-    public var activationDistance = 1.0
+    public var activationDistance = 0.73
 
     /// If the gap between fingers changes faster than the centroid moves by
     /// this ratio, treat the motion as a pinch and refuse to scroll.
@@ -57,7 +57,7 @@ public final class ScrollRecognizer {
     /// stop when you told it to.
     public var stopWindow = 0.07
     /// Per-frame travel below which a frame counts as stationary.
-    public var stopFrameTravel = 0.3
+    public var stopFrameTravel = 0.22
 
     private enum State {
         case idle

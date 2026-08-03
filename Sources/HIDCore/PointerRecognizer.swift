@@ -23,7 +23,7 @@ public final class PointerRecognizer {
     /// Longest a touch can last and still count as a tap.
     public var tapMaxDuration = 0.4
     /// Furthest a finger can travel and still count as a tap.
-    public var tapMaxTravel = 2.0
+    public var tapMaxTravel = 1.45
 
     /// Two-finger equivalents, deliberately looser.
     ///
@@ -33,14 +33,14 @@ public final class PointerRecognizer {
     /// the second finger arrives. Reusing the one-finger numbers rejected most
     /// real two-finger taps.
     public var twoFingerTapMaxDuration = 0.6
-    public var twoFingerTapMaxTravel = 4.0
+    public var twoFingerTapMaxTravel = 2.9
 
     /// Maximum gap between taps for the second to be a double — measured from
     /// the first tap lifting to the second finger landing, so it is
     /// independent of how long either tap itself takes.
     public var doubleTapInterval = 0.4
     /// How far apart two taps can land and still pair up.
-    public var doubleTapMaxDistance = 8.0
+    public var doubleTapMaxDistance = 5.8
     /// Two-finger tap produces a right click.
     public var twoFingerTapEnabled = true
     /// Ignore contacts the hardware marks as not confident.

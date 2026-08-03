@@ -13,6 +13,23 @@ public enum ZSA {
     /// Windows Precision Touchpad Input Mode values (Microsoft PTP spec).
     public static let inputModeMouse: UInt8 = 0
     public static let inputModeMultitouch: UInt8 = 3
+
+    /// Measured width of the touch surface, in millimetres.
+    ///
+    /// The report descriptor claims 55 mm — Logical Max 2048, Physical Max 550,
+    /// Unit Exponent 0x0E (−2), Unit 0x11 (SI linear, cm). The sensor measures
+    /// 40 mm. PTP descriptors are copied wholesale between projects and the
+    /// physical range is the field people forget to update, so this is very
+    /// likely inherited boilerplate rather than a measurement.
+    ///
+    /// It matters because nothing downstream can detect the error: every
+    /// millimetre is inflated by the same 1.375×, so the pipeline stays
+    /// self-consistent and tuning by feel still converges — on numbers whose
+    /// units are wrong. Correcting it here means every threshold in the project
+    /// is denominated in real millimetres.
+    ///
+    /// The pad is square; X and Y declare identical ranges.
+    public static let measuredSurfaceWidthMM = 40.0
 }
 
 public struct DeviceInfo {

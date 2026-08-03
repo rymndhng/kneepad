@@ -2,8 +2,8 @@ import Foundation
 import HIDCore
 
 // The descriptor's physical range is a claim. On this device it claims 55mm
-// across, while the sensor measures about 25mm — so every millimetre the
-// pipeline reports is inflated ~2.2x. These pin the correction.
+// across, while the sensor measures 40mm — so uncorrected, every millimetre
+// the pipeline reports is inflated 1.375x. These pin the correction.
 
 func runCalibrationTests() {
     TestRunner.suite("Surface calibration") {
@@ -11,7 +11,7 @@ func runCalibrationTests() {
         TestRunner.test("the descriptor's own claim is preserved separately") {
             let parsed = try parseDescriptor(voyagerDescriptor)
             var layout = try require(discoverTouchLayout(parsed))
-            layout.positionScale = 25.0 / 55.0
+            layout.positionScale = ZSA.measuredSurfaceWidthMM / 55.0
 
             let declared = try require(layout.declaredSurfaceSize)
             expectClose(declared.x, 55.0, 0.05,
@@ -21,11 +21,11 @@ func runCalibrationTests() {
         TestRunner.test("correcting the scale corrects the reported surface") {
             let parsed = try parseDescriptor(voyagerDescriptor)
             var layout = try require(discoverTouchLayout(parsed))
-            layout.positionScale = 25.0 / 55.0
+            layout.positionScale = ZSA.measuredSurfaceWidthMM / 55.0
 
             let size = try require(layout.surfaceSize)
-            expectClose(size.x, 25.0, 0.05, "surface width after correction")
-            expectClose(size.y, 25.0, 0.05, "surface height after correction")
+            expectClose(size.x, 40.0, 0.05, "surface width after correction")
+            expectClose(size.y, 40.0, 0.05, "surface height after correction")
         }
 
         TestRunner.test("a corrected scale carries into decoded positions") {
@@ -41,12 +41,12 @@ func runCalibrationTests() {
             expectClose(layout.decode(body).contacts[0].position.x, 27.5, 0.01,
                         "half of the claimed 55mm")
 
-            layout.positionScale = 25.0 / 55.0
-            expectClose(layout.decode(body).contacts[0].position.x, 12.5, 0.01,
-                        "half of the measured 25mm")
+            layout.positionScale = ZSA.measuredSurfaceWidthMM / 55.0
+            expectClose(layout.decode(body).contacts[0].position.x, 20.0, 0.01,
+                        "half of the measured 40mm")
         }
 
-        TestRunner.test("the default trusts the descriptor") {
+        TestRunner.test("an uncorrected layout trusts the descriptor") {
             let parsed = try parseDescriptor(voyagerDescriptor)
             let layout = try require(discoverTouchLayout(parsed))
             expectClose(layout.positionScale, 1.0, 1e-12,

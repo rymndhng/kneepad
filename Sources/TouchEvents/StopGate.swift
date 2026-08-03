@@ -28,7 +28,7 @@ public struct StopGate {
     ///
     /// Below this the firmware's filter is barely charged, there is no tail
     /// worth cutting, and gating would only eat deliberate slow movement.
-    public var armSpeed = 120.0
+    public var armSpeed = 87.0
 
     /// Speed below which decaying movement is treated as tail, not finger.
     ///
@@ -36,7 +36,7 @@ public struct StopGate {
     /// distinguishable from a finger genuinely slowing down. Raising this cuts
     /// more of the glide but starts truncating real deceleration, so the
     /// cursor stops while the hand is still moving.
-    public var stopSpeed = 60.0
+    public var stopSpeed = 44.0
 
     /// Consecutive decelerating frames required before firing.
     ///
@@ -47,7 +47,7 @@ public struct StopGate {
     ///
     /// A tail decays monotonically, so any real acceleration breaks it. Kept
     /// above the noise floor so jitter alone cannot reopen it.
-    public var reawakenDelta = 8.0
+    public var reawakenDelta = 5.8
 
     private var armed = false
     private var engaged = false
@@ -103,8 +103,8 @@ public struct StopGate {
     /// Fire on the smallest hint of a stop, at the cost of clipping genuine
     /// deceleration. For when a hard stop matters more than a smooth one.
     public mutating func makeAggressive() {
-        armSpeed = 50
-        stopSpeed = 140
+        armSpeed = 36
+        stopSpeed = 102
         confirmFrames = 1
     }
 }

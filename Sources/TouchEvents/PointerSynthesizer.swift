@@ -10,7 +10,7 @@ public final class PointerSynthesizer {
 
     public struct Configuration {
         /// Screen pixels per millimetre of finger travel, before acceleration.
-        public var gain = 12.0
+        public var gain = 16.5
         /// Peak multiplier for fast movement.
         public var maxAcceleration = 3.2
 
@@ -31,17 +31,18 @@ public final class PointerSynthesizer {
         /// `gain` applies literally.
         ///
         /// Together with the floor this sets where the flat region ends —
-        /// `reference × floor^(1/curve)`, currently ~107 mm/s. That flat span
+        /// `reference × floor^(1/curve)`, currently ~78 mm/s. That flat span
         /// is the part that has to cover ordinary aiming; raising the
         /// reference widens it, lowering it brings acceleration in earlier.
         ///
-        /// Lowered from 260 because short strokes needed too much effort. A
+        /// Lowered (from an equivalent 190) because short strokes needed too much
+        /// effort. A
         /// wide flat zone means a stroke has to be genuinely fast before it is
         /// amplified at all, and vertical strokes rarely are — the finger has
         /// far less range flexing than sweeping sideways, so up-and-down
         /// movement sat inside the flat zone almost always. Shrinking the zone
         /// helps every direction, and vertical most.
-        public var accelerationReference = 170.0
+        public var accelerationReference = 124.0
 
         /// Curve steepness past the knee. Higher climbs to the ceiling faster.
         ///

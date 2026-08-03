@@ -14,7 +14,7 @@ public final class ScrollSynthesizer {
     public struct Configuration {
         /// Screen pixels emitted per millimetre of finger travel.
         /// Tuned by hand on the 55mm ZSA pad.
-        public var gain = 32.0
+        public var gain = 44.0
         /// Natural scrolling: content follows the fingers.
         public var naturalDirection = true
         public var invertHorizontal = false
@@ -23,7 +23,7 @@ public final class ScrollSynthesizer {
         /// Expressed in **mm/s** rather than px/s so it stays a statement about
         /// how fast the finger moved, independent of `gain`. Otherwise raising
         /// gain silently makes momentum trigger on ever-slower releases.
-        public var momentumThreshold = 2.0
+        public var momentumThreshold = 1.45
         /// Seconds for momentum velocity to decay to 1/e.
         ///
         /// Expressed as a time constant rather than per-tick friction so the
