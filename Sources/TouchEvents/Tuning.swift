@@ -13,12 +13,12 @@ import HIDCore
 public struct Tuning: Codable, Equatable {
 
     // Pointer
-    public var pointerGain = 16.5
+    public var pointerGain = 16.0
     public var accelEnabled = true
     public var accelMin = 0.6
     public var accelMax = 3.2
-    public var accelCurve = 1.1
-    public var accelReference = 124.0
+    public var accelCurve = 0.92
+    public var accelReference = 260.0
 
     // Stopping
     public var stopGateEnabled = true

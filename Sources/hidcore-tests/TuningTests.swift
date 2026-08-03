@@ -213,3 +213,49 @@ func runTelemetryTests() {
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
     }
 }
+
+// Scroll direction was inverted in shipped code: what the configuration called
+// "natural" produced the opposite of macOS's natural scrolling, and --reverse
+// produced the right thing. Pinned here so it cannot silently flip back.
+
+func runScrollDirectionTests() {
+    TestRunner.suite("Scroll direction") {
+
+        /// Fingers moving down the pad. Pad Y grows downward, so this is +y.
+        let downward = Point(x: 0, y: 10)
+        /// Fingers moving right.
+        let rightward = Point(x: 10, y: 0)
+
+        TestRunner.test("natural scrolling sends the content after the fingers") {
+            var config = ScrollSynthesizer.Configuration()
+            config.naturalDirection = true
+            check(config.pixels(downward).y > 0,
+                  "dragging down must produce a positive scroll delta")
+        }
+
+        TestRunner.test("reversing flips only the vertical axis") {
+            var natural = ScrollSynthesizer.Configuration()
+            natural.naturalDirection = true
+            var reversed = ScrollSynthesizer.Configuration()
+            reversed.naturalDirection = false
+
+            expectClose(reversed.pixels(downward).y, -natural.pixels(downward).y, 1e-9)
+            expectClose(reversed.pixels(rightward).x, natural.pixels(rightward).x, 1e-9,
+                        "--reverse is about vertical scrolling only")
+        }
+
+        TestRunner.test("horizontal inversion is independent") {
+            var config = ScrollSynthesizer.Configuration()
+            config.invertHorizontal = true
+            check(config.pixels(rightward).x < 0, "inverted horizontal must flip x")
+            check(config.pixels(downward).y > 0, "and must leave vertical alone")
+        }
+
+        TestRunner.test("gain scales both axes equally") {
+            var config = ScrollSynthesizer.Configuration()
+            config.gain = 10
+            expectClose(config.pixels(Point(x: 3, y: 4)).x, 30, 1e-9)
+            expectClose(abs(config.pixels(Point(x: 3, y: 4)).y), 40, 1e-9)
+        }
+    }
+}

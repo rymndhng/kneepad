@@ -10,7 +10,7 @@ public final class PointerSynthesizer {
 
     public struct Configuration {
         /// Screen pixels per millimetre of finger travel, before acceleration.
-        public var gain = 16.5
+        public var gain = 16.0
         /// Peak multiplier for fast movement.
         public var maxAcceleration = 3.2
 
@@ -31,26 +31,30 @@ public final class PointerSynthesizer {
         /// `gain` applies literally.
         ///
         /// Together with the floor this sets where the flat region ends —
-        /// `reference × floor^(1/curve)`, currently ~78 mm/s. That flat span
-        /// is the part that has to cover ordinary aiming; raising the
-        /// reference widens it, lowering it brings acceleration in earlier.
+        /// `reference × floor^(1/curve)`, currently ~149 mm/s. That flat span
+        /// is what has to cover ordinary aiming; raising the reference widens
+        /// it, lowering it brings acceleration in earlier.
         ///
-        /// Lowered (from an equivalent 190) because short strokes needed too much
-        /// effort. A
-        /// wide flat zone means a stroke has to be genuinely fast before it is
-        /// amplified at all, and vertical strokes rarely are — the finger has
-        /// far less range flexing than sweeping sideways, so up-and-down
-        /// movement sat inside the flat zone almost always. Shrinking the zone
-        /// helps every direction, and vertical most.
-        public var accelerationReference = 124.0
+        /// It moved a long way during tuning — 190, then 124, then here — and
+        /// the last move went with the exponent dropping below 1. The pair is
+        /// what matters: a wide flat zone with a *gentle* ramp above it feels
+        /// different from a narrow zone with a steep one, even where the two
+        /// curves cross. Read them together, not separately.
+        public var accelerationReference = 260.0
 
         /// Curve steepness past the knee. Higher climbs to the ceiling faster.
         ///
         /// Not what keeps the middle of the range flat — an earlier version of
         /// this comment claimed it was, and tuning by hand disproved it. The
         /// flat span comes from the floor and the reference speed; the
-        /// exponent only shapes what happens above it.
-        public var accelerationCurve = 1.1
+        /// exponent only shapes what happens above it. It does move the knee,
+        /// though, because the curve pivots about the reference rather than
+        /// about the knee.
+        ///
+        /// Below 1, so amplification arrives gradually: the ceiling is not
+        /// reached until ~920 mm/s, which is faster than any deliberate stroke
+        /// on a pad 40 mm across.
+        public var accelerationCurve = 0.92
         public var accelerationEnabled = true
 
         /// Suppresses the sensor's deceleration tail after a fast stop.

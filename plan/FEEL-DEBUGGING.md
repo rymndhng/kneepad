@@ -83,7 +83,7 @@ before adding the stage.
 ## Settled values
 
 ```
---pointer-gain 16.5 --accel-ref 124 --accel-min 0.6 --accel-max 3.2 --accel-curve 1.1
+--pointer-gain 16 --accel-ref 260 --accel-min 0.6 --accel-max 3.2 --accel-curve 0.92
 ```
 
 All found by hand, at an equivalent gain of 12 and reference of 170 — those
@@ -91,8 +91,15 @@ were denominated in the descriptor's inflated millimetre. The sensor measures
 40 mm against a claimed 55, so the constants were rescaled once when that was
 settled. Same feel, real units.
 
-The reference moved 260 → 170 (in the old units) to shrink the flat zone; in
-real millimetres it is 124, and the flat zone runs to 78 mm/s.
+The reference wandered: 190, then 124, then 260 real mm/s, the last move paired
+with the exponent dropping below 1. The pair is what matters — a wide flat zone
+with a gentle ramp above it feels unlike a narrow zone with a steep one, even
+where the two curves cross. The flat zone now runs to 149 mm/s and the ceiling
+is not reached until ~920, faster than any deliberate stroke on a 40 mm pad.
+
+Two test bounds moved to accommodate values chosen by hand, both of which sat
+outside bounds I had chosen by argument. They are sanity rails against typos
+now, not judgements about feel.
 A wide flat zone means a stroke must be genuinely fast before it is amplified
 at all, and **vertical strokes rarely are**: a finger flexes over far less
 distance than it sweeps sideways, so up-and-down movement sat inside the flat

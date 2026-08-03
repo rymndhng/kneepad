@@ -14,14 +14,14 @@ func printUsage() {
 
     USAGE
       touchd                        run the driver
-      touchd --pointer-gain N       cursor px per mm (default 12)
+      touchd --pointer-gain N       cursor px per mm (default 16)
       touchd --scroll-gain N        scroll px per mm (default 32)
       touchd --friction N           per-tick friction (derived from --decay)
       touchd --flick N              mm/s release speed for momentum (default 2)
       touchd --accel-max N          multiplier ceiling, fast movement (default 3.2)
       touchd --accel-min N          multiplier floor, slow movement (default 0.6)
-      touchd --accel-curve N        steepness above the knee (default 1.1)
-      touchd --accel-ref N          mm/s where the multiplier is exactly 1 (170)
+      touchd --accel-curve N        steepness above the knee (default 0.92)
+      touchd --accel-ref N          mm/s where the multiplier is exactly 1 (260)
                                     lower = smaller flat zone, earlier accel
       touchd --no-accel             disable pointer acceleration
       touchd --decay N              momentum decay time constant (default 0.27s)

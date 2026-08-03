@@ -15,5 +15,6 @@ runStopGateTests()
 runCalibrationTests()
 runTuningTests()
 runTelemetryTests()
+runScrollDirectionTests()
 
 exit(TestRunner.summarize())

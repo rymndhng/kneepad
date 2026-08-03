@@ -16,8 +16,27 @@ public final class ScrollSynthesizer {
         /// Tuned by hand on the 55mm ZSA pad.
         public var gain = 44.0
         /// Natural scrolling: content follows the fingers.
+        ///
+        /// The sign below was wrong in both directions until it was checked
+        /// against the hardware — `--reverse` produced macOS's natural feel and
+        /// the default produced its opposite.
         public var naturalDirection = true
         public var invertHorizontal = false
+
+        /// Finger millimetres to scroll pixels, sign included.
+        ///
+        /// Pure, so the direction convention can be pinned by a test rather
+        /// than rediscovered by scrolling a window. Pad Y grows downward; a
+        /// CGEvent scroll delta is positive when content moves the way a wheel
+        /// pushed away from you moves it. Natural scrolling means the content
+        /// follows the fingers, which works out as passing the sign through
+        /// rather than negating it — the opposite of what this code did until
+        /// the hardware said otherwise.
+        public func pixels(_ millimetres: Point) -> Point {
+            let vertical = naturalDirection ? millimetres.y : -millimetres.y
+            let horizontal = invertHorizontal ? -millimetres.x : millimetres.x
+            return Point(x: horizontal * gain, y: vertical * gain)
+        }
         /// Release speed below which momentum isn't worth animating.
         ///
         /// Expressed in **mm/s** rather than px/s so it stays a statement about
@@ -98,12 +117,7 @@ public final class ScrollSynthesizer {
     // MARK: Conversion
 
     private func pixels(_ millimetres: Point) -> Point {
-        let g = configuration.gain
-        // Pad Y grows downward. With natural scrolling the content follows the
-        // fingers, so a downward drag scrolls content down.
-        let vertical = configuration.naturalDirection ? -millimetres.y : millimetres.y
-        let horizontal = configuration.invertHorizontal ? -millimetres.x : millimetres.x
-        return Point(x: horizontal * g, y: vertical * g)
+        configuration.pixels(millimetres)
     }
 
     // MARK: Momentum
