@@ -202,6 +202,16 @@ everything mouse mode did, so the pad stays usable while it runs.
   so a second finger landing doesn't yank the pointer.
 - Tap to click (≤0.25 s, ≤2 mm travel), two-finger tap for right click,
   double-tap pairing by time *and* distance.
+- **Two-finger taps are judged on their own, looser budget** (≤0.4 s, ≤4 mm).
+  The sequence spans the first touchdown to the last liftoff, so it absorbs
+  both fingers' timing slop; the one-finger numbers rejected most real ones.
+- **Fingers are counted over the whole sequence, not per frame.** At ~154 Hz
+  two fingers tapped together often miss each other by a report — one lands as
+  the other leaves — so they never coexist in a single frame. Counting only
+  simultaneous contacts turned those into *left* clicks, and into double clicks
+  if you tapped twice. Track IDs are monotonic and a sequence ends when every
+  finger is up, so counting distinct IDs can't mistake two single taps for one
+  two-finger tap.
 - Physical buttons are edge-detected; drags post `…MouseDragged` rather than
   `mouseMoved`, or text selection breaks.
 - Saturating acceleration curve — raw deltas feel awful.
@@ -212,6 +222,11 @@ everything mouse mode did, so the pad stays usable while it runs.
 stays suppressed for the pointer until every finger lifts. Without it the
 straggler ending a scroll drags the cursor across the screen — the same
 one-finger-lifts-first problem that broke momentum.
+
+**Primary changes are discontinuities.** When the oldest finger lifts and
+another stays down, the new primary is centimetres away. Diffing across that
+measured the *gap between two fingers* as motion: a cursor jump, plus enough
+phantom travel to disqualify the tap. The frame re-seeds instead.
 
 ### Stage 4 — Scroll ✅ (built, needs feel-testing)
 `HIDCore/ScrollRecognizer.swift` + `TouchEvents/ScrollSynthesizer.swift`,

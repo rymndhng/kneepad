@@ -137,6 +137,65 @@ func runPointerRecognizerTests() {
             check(result.first?.0 == .right, "two fingers means right click")
         }
 
+        // Real fingers do not land or lift on the same frame. At ~154Hz a
+        // perfectly ordinary two-finger tap can have the second finger arrive
+        // as the first leaves, so the two never appear in one report — which
+        // used to produce a LEFT click, and a double one if you tapped twice.
+        TestRunner.test("two fingers offset by a frame is still a right click") {
+            let h = Harness()
+            _ = h.step([contact(0, 20, 20)])                       // first alone
+            _ = h.step([contact(1, 32, 20)])                       // second alone
+            let result = taps(h.step([]))
+
+            expectEqual(result.count, 1)
+            check(result.first?.0 == .right,
+                  "two distinct fingers means right click even without overlap")
+        }
+
+        TestRunner.test("a two-finger tap is given a looser time budget") {
+            let h = Harness()
+            let contacts = [contact(0, 20, 20), contact(1, 32, 20)]
+            _ = h.step(contacts)
+            // 0.3s — past the one-finger limit, inside the two-finger one.
+            h.hold(contacts, frames: 29)
+            let result = taps(h.step([]))
+
+            expectEqual(result.count, 1, "two fingers land and lift less crisply")
+            check(result.first?.0 == .right, "expected a right tap")
+        }
+
+        TestRunner.test("a two-finger tap held too long is still rejected") {
+            let h = Harness()
+            let contacts = [contact(0, 20, 20), contact(1, 32, 20)]
+            _ = h.step(contacts)
+            h.hold(contacts, frames: 60)          // 0.6s, past twoFingerTapMaxDuration
+            expectEqual(taps(h.step([])).count, 0, "a rest is not a tap")
+            check(h.recognizer.lastTapRejection != nil, "the reason must be reported")
+        }
+
+        TestRunner.test("a two-finger drag is not a right click") {
+            let h = Harness()
+            _ = h.step([contact(0, 20, 20), contact(1, 32, 20)])
+            _ = h.step([contact(0, 20, 32), contact(1, 32, 32)])   // 12mm scroll
+            expectEqual(taps(h.step([])).count, 0, "that was a scroll")
+        }
+
+        TestRunner.test("two-finger tap can be disabled on its own") {
+            let h = Harness()
+            h.recognizer.twoFingerTapEnabled = false
+            _ = h.step([contact(0, 20, 20), contact(1, 32, 20)])
+            expectEqual(taps(h.step([])).count, 0, "no right click, and no left one either")
+        }
+
+        TestRunner.test("a right tap does not pair into a double click") {
+            let h = Harness()
+            _ = h.step([contact(0, 20, 20), contact(1, 32, 20)])
+            _ = taps(h.step([]))
+            _ = h.step([contact(0, 20, 20), contact(1, 32, 20)])
+            let result = taps(h.step([]))
+            expectEqual(result.first?.1, 1, "double right clicks are not a gesture")
+        }
+
         TestRunner.test("two taps in quick succession make a double click") {
             let h = Harness()
             _ = h.step([contact(0, 20, 20)])

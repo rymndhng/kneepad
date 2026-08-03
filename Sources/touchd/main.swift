@@ -25,7 +25,13 @@ func printUsage() {
       touchd --decay N              momentum decay time constant (default 0.27s)
       touchd --no-momentum          disable inertial scrolling
       touchd --no-tap               disable tap-to-click
+      touchd --no-right-tap         two-finger tap does not right click
+      touchd --two-tap-time N       two-finger tap max duration (default 0.4s)
+      touchd --two-tap-travel N     two-finger tap max travel (default 4mm)
       touchd --reverse              invert scroll direction
+
+      Two-finger tap not registering? Run --verbose; it prints why each
+      touch failed to qualify, then raise whichever limit it names.
 
     SMOOTHING (1€ filter over contact positions)
       touchd --cutoff N             Hz at rest; lower is steadier (default 1.2)
@@ -68,6 +74,11 @@ func value(_ flag: String) -> Double? {
 let verbose = args.contains("--verbose")
 let dryRun = args.contains("--dry-run")
 let tapEnabled = !args.contains("--no-tap")
+// Separable from tap-to-click: right-clicking by two-finger tap is the part
+// people most often want off on its own, because it can fire during scrolls.
+let rightTapEnabled = tapEnabled && !args.contains("--no-right-tap")
+let twoTapTime = value("--two-tap-time")
+let twoTapTravel = value("--two-tap-travel")
 
 let showStats = args.contains("--stats")
 
@@ -169,6 +180,9 @@ print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
              scrollConfig.naturalDirection ? "natural" : "reversed",
              scrollConfig.momentumDecayTime))
 print("Tap to click  \(tapEnabled ? "on" : "off")")
+print(String(format: "Two-finger    %@  (max %.0f ms, %.1f mm)",
+             rightTapEnabled ? "tap → right click" : "right click off",
+             (twoTapTime ?? 0.4) * 1000, twoTapTravel ?? 4.0))
 if dryRun { print("Dry run       recognising only, posting nothing") }
 print()
 
@@ -199,7 +213,9 @@ let tracker = ContactTracker(layout: session.layout)
 tracker.smoothing = smoothing
 let scrollRecognizer = ScrollRecognizer()
 let pointerRecognizer = PointerRecognizer()
-pointerRecognizer.twoFingerTapEnabled = tapEnabled
+pointerRecognizer.twoFingerTapEnabled = rightTapEnabled
+if let twoTapTime { pointerRecognizer.twoFingerTapMaxDuration = twoTapTime }
+if let twoTapTravel { pointerRecognizer.twoFingerTapMaxTravel = twoTapTravel }
 let scrollSynthesizer = ScrollSynthesizer(configuration: scrollConfig)
 let pointerSynthesizer = PointerSynthesizer(configuration: pointerConfig)
 
@@ -364,7 +380,15 @@ session.onFrame = { frame, _ in
         }
     }
 
-    for event in pointerRecognizer.update(tracks: tracks, buttons: frame.buttons, dt: dt) {
+    let previousRejection = pointerRecognizer.lastTapRejection
+    let pointerEvents = pointerRecognizer.update(tracks: tracks, buttons: frame.buttons, dt: dt)
+    // A tap that does nothing looks identical to one that was never seen, so
+    // say why. Only on change, or a resting hand would spam the log.
+    if verbose, let reason = pointerRecognizer.lastTapRejection, reason != previousRejection {
+        print("no tap: \(reason)")
+    }
+
+    for event in pointerEvents {
         // Filter before synthesising, not after — otherwise --no-tap only
         // silences the log line while still clicking.
         if case .tap = event, !tapEnabled { continue }
