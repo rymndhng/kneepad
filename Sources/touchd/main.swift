@@ -267,6 +267,10 @@ do {
 
 let tracker = ContactTracker(layout: session.layout)
 let scrollRecognizer = ScrollRecognizer()
+// Publishes what the pointer is doing so the tuner can mark it on the curve.
+// Optional: if it cannot be created the driver carries on regardless.
+let telemetry = args.contains("--no-live") ? nil : TelemetryChannel(writable: true)
+
 let scrollSynthesizer = ScrollSynthesizer(configuration: scrollConfig)
 let pointerSynthesizer = PointerSynthesizer(configuration: pointerConfig)
 
@@ -435,6 +439,19 @@ session.onFrame = { frame, _ in
     // say why. Only on change, or a resting hand would spam the log.
     if verbose, let reason = pointerRecognizer.lastTapRejection, reason != previousRejection {
         print("no tap: \(reason)")
+    }
+
+    // Publish before filtering, so the panel shows the speed the curve sees
+    // even for motion the stop gate is about to drop.
+    if let telemetry {
+        var speed = 0.0
+        for case .move(let millimetres) in pointerEvents where dt > 0 {
+            speed = millimetres.magnitude / dt
+        }
+        telemetry.publish(speed: speed,
+                          pixelsPerMillimetre: pointerSynthesizer.configuration
+                              .pixelsPerMillimetre(atSpeed: speed),
+                          contacts: tracks.count)
     }
 
     for event in pointerEvents {

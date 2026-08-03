@@ -446,6 +446,18 @@ process to macOS — no Dock icon, no menu bar, and it cannot be focused
 properly. The bundle is what makes it a real app; copy it to `/Applications`
 to keep it.
 
+While `touchd` runs, the plot marks **where your finger is on the curve right
+now** — a dot at the current speed, with a fading trail of the last ~1.5 s. That
+is the question the knee setting actually turns on: not what the curve looks
+like, but where your own gestures land against it.
+
+The driver publishes speed through `TouchEvents/Telemetry.swift`, a one-slot
+mmap'd page. Shared memory rather than a socket or a file rewrite because the
+publish happens inside the HID callback ~154 times a second, and that callback
+has a 6.5 ms budget it has already blown once. A store into a mapped page costs
+no syscall, so nothing watching can slow the driver down — and neither can
+nothing watching it.
+
 Sliders commit **on release**, not while dragging. A continuous slider fires on
 every tick of travel, and writing each one floods the watcher with reloads for
 values that were only passed through on the way to the intended one. The plot

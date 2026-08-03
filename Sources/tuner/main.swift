@@ -20,6 +20,14 @@ import TouchEvents
 final class CurveView: NSView {
     var tuning = Tuning() { didSet { needsDisplay = true } }
 
+    /// Current finger speed in mm/s, or nil when nothing is touching the pad.
+    var liveSpeed: Double? { didSet { needsDisplay = true } }
+
+    /// Recent speeds, newest last, for a fading trail. A single dot at 154 Hz
+    /// is a blur; the trail is what makes the shape of a gesture readable —
+    /// how far up the curve it reached and how long it spent there.
+    var trail: [Double] = []
+
     private let sMin = 3.0, sMax = 1000.0
     private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 34, right: 12)
 
@@ -91,6 +99,50 @@ final class CurveView: NSView {
         curve.lineJoinStyle = .round
         NSColor.controlAccentColor.setStroke()
         curve.stroke()
+
+        // Trail, oldest faintest.
+        for (index, speed) in trail.enumerated() where speed > sMin {
+            let age = Double(index + 1) / Double(max(trail.count, 1))
+            NSColor.controlAccentColor.withAlphaComponent(0.05 + 0.25 * age).setFill()
+            let px = tuning.pixelsPerMillimetre(atSpeed: speed)
+            let point = NSPoint(x: x(min(speed, sMax)),
+                                y: min(inset.top + h, max(inset.top, y(px))))
+            NSBezierPath(ovalIn: NSRect(x: point.x - 2.5, y: point.y - 2.5,
+                                        width: 5, height: 5)).fill()
+        }
+
+        // The live position.
+        if let live = liveSpeed, live > sMin {
+            let px = tuning.pixelsPerMillimetre(atSpeed: live)
+            let point = NSPoint(x: x(min(live, sMax)),
+                                y: min(inset.top + h, max(inset.top, y(px))))
+
+            NSColor.controlAccentColor.withAlphaComponent(0.5).setStroke()
+            let drop = NSBezierPath()
+            drop.move(to: NSPoint(x: point.x, y: inset.top + h))
+            drop.line(to: point)
+            drop.lineWidth = 1
+            drop.setLineDash([3, 3], count: 2, phase: 0)
+            drop.stroke()
+
+            NSColor.textBackgroundColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: point.x - 6, y: point.y - 6,
+                                        width: 12, height: 12)).fill()
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: point.x - 4.5, y: point.y - 4.5,
+                                        width: 9, height: 9)).fill()
+
+            let text = NSAttributedString(
+                string: String(format: "%.0f mm/s → %.1f px/mm", live, px),
+                attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+                    .foregroundColor: NSColor.controlAccentColor,
+                ])
+            // Flip the label inside the plot when the dot is near the edge.
+            let tx = point.x + 10 + text.size().width > inset.left + w
+                ? point.x - 10 - text.size().width : point.x + 10
+            text.draw(at: NSPoint(x: tx, y: max(inset.top, point.y - 16)))
+        }
 
         let axis = NSAttributedString(string: "finger speed — mm/s, log scale", attributes: label)
         axis.draw(at: NSPoint(x: inset.left + (w - axis.size().width) / 2,
@@ -314,6 +366,8 @@ final class TunerController: NSObject, NSWindowDelegate {
             controls.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
         ])
 
+        startTelemetry()
+
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
         status.stringValue = "touchd applies changes as you move a slider"
@@ -410,6 +464,40 @@ final class TunerController: NSObject, NSWindowDelegate {
             return
         }
         write()
+    }
+
+    // MARK: Live position on the curve
+
+    private var telemetry: TelemetryChannel?
+    private var telemetryTimer: Timer?
+
+    /// Polls the driver's shared-memory slot at display rate.
+    ///
+    /// Polling rather than being pushed: the driver must not block on, or even
+    /// know about, anything watching it. Reopening on failure covers the panel
+    /// being started before the driver.
+    private func startTelemetry() {
+        telemetryTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60,
+                                              repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if telemetry == nil { telemetry = TelemetryChannel(writable: false) }
+            guard let telemetry, telemetry.isLive() else {
+                if curve.liveSpeed != nil { curve.liveSpeed = nil }
+                if !curve.trail.isEmpty { curve.trail.removeAll(); curve.needsDisplay = true }
+                return
+            }
+
+            let sample = telemetry.read()
+            let touching = sample.contacts > 0 && sample.speed > 0
+            curve.liveSpeed = touching ? sample.speed : nil
+            if touching {
+                curve.trail.append(sample.speed)
+                if curve.trail.count > 90 { curve.trail.removeFirst() }   // ~1.5s
+            } else if !curve.trail.isEmpty {
+                curve.trail.removeFirst()
+                curve.needsDisplay = true
+            }
+        }
     }
 
     private func write() {
