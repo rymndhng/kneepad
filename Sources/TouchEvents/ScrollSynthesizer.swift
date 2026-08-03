@@ -120,7 +120,18 @@ public final class ScrollSynthesizer {
         momentumTimer?.cancel()
         momentumTimer = nil
         momentumVelocity = Point(x: 0, y: 0)
-        if wasCoasting { post(delta: Point(x: 0, y: 0), phase: nil, momentum: .end) }
+        guard wasCoasting else { return }
+
+        // Two signals, because one was not enough. Ending the momentum phase is
+        // the correct protocol and satisfies AppKit scroll views. Maps kept
+        // gliding anyway, so this also sends what a real trackpad sends when
+        // fingers land — mayBegin — which is the signal an app watches to
+        // abandon inertia it is animating itself.
+        //
+        // Still a hypothesis: see `scroll-probe`, which prints what the
+        // built-in trackpad actually emits at that moment.
+        post(delta: Point(x: 0, y: 0), phase: nil, momentum: .end)
+        post(delta: Point(x: 0, y: 0), phase: .mayBegin, momentum: .none)
     }
 
     // MARK: Conversion
@@ -175,7 +186,13 @@ public final class ScrollSynthesizer {
     }
 
     public enum Phase: Int64 {
-        case began = 1, changed = 2, ended = 4
+        case began = 1, changed = 2, ended = 4, cancelled = 8
+        /// Fingers are resting on the pad but have not scrolled yet.
+        ///
+        /// A real trackpad emits this the moment fingers touch down, and it is
+        /// what an app watches to abandon an inertial scroll — the momentum end
+        /// event alone was not enough for Maps.
+        case mayBegin = 128
     }
 
     /// Observes every event this would post. Exists so the phase sequence can

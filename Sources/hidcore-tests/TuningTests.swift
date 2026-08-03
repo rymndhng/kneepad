@@ -268,12 +268,19 @@ func runMomentumPhaseTests() {
     TestRunner.suite("Scroll momentum phases") {
 
         /// A synthesiser that records phases instead of posting events.
-        func recorder() -> (ScrollSynthesizer, () -> [ScrollSynthesizer.MomentumPhase]) {
+        final class Log {
+            var momentum: [ScrollSynthesizer.MomentumPhase] = []
+            var scroll: [ScrollSynthesizer.Phase] = []
+        }
+        func recorder() -> (ScrollSynthesizer, Log) {
             let synth = ScrollSynthesizer()
-            var seen: [ScrollSynthesizer.MomentumPhase] = []
+            let log = Log()
             synth.postsEvents = false
-            synth.onPost = { _, _, momentum in seen.append(momentum) }
-            return (synth, { seen })
+            synth.onPost = { _, phase, momentum in
+                log.momentum.append(momentum)
+                if let phase { log.scroll.append(phase) }
+            }
+            return (synth, log)
         }
 
         /// A release fast enough to coast.
@@ -283,49 +290,63 @@ func runMomentumPhaseTests() {
         }
 
         TestRunner.test("a flick begins momentum") {
-            let (synth, seen) = recorder()
+            let (synth, log) = recorder()
             synth.handle(flick())
-            check(seen().contains(.begin), "expected a momentum begin, got \(seen())")
+            check(log.momentum.contains(.begin),
+                  "expected a momentum begin, got \(log.momentum)")
         }
 
         // The reported symptom: coasting in Maps, two fingers back down, and
         // the map carried on. Cancelling our timer is not enough — the app is
         // running its own animation and only stops when told momentum ended.
-        TestRunner.test("interrupting a glide tells the app momentum ended") {
-            let (synth, seen) = recorder()
+        TestRunner.test("interrupting a glide ends the momentum sequence") {
+            let (synth, log) = recorder()
             synth.handle(flick())
             synth.cancelMomentum()
-            check(seen().last == .end,
-                  "expected the sequence to end, got \(seen())")
+            check(log.momentum.contains(.end),
+                  "expected a momentum end, got \(log.momentum)")
+        }
+
+        // Ending the momentum phase satisfies AppKit scroll views but did not
+        // stop Maps, which animates its own inertia. mayBegin is what a real
+        // trackpad emits when fingers land, and what an app watches to abandon
+        // that animation.
+        TestRunner.test("interrupting a glide also says fingers have landed") {
+            let (synth, log) = recorder()
+            synth.handle(flick())
+            synth.cancelMomentum()
+            check(log.scroll.contains(.mayBegin),
+                  "expected a mayBegin, got \(log.scroll)")
         }
 
         TestRunner.test("every begin is matched by exactly one end") {
-            let (synth, seen) = recorder()
+            let (synth, log) = recorder()
             synth.handle(flick())
             synth.cancelMomentum()
             synth.cancelMomentum()      // idle cancels must stay silent
             synth.cancelMomentum()
-            let begins = seen().filter { $0 == .begin }.count
-            let ends = seen().filter { $0 == .end }.count
+            let begins = log.momentum.filter { $0 == .begin }.count
+            let ends = log.momentum.filter { $0 == .end }.count
             expectEqual(begins, 1, "one flick, one begin")
             expectEqual(ends, 1, "a repeated cancel must not repeat the end")
         }
 
         TestRunner.test("cancelling when nothing is coasting posts nothing") {
-            let (synth, seen) = recorder()
+            let (synth, log) = recorder()
             synth.cancelMomentum()
-            expectEqual(seen().count, 0,
+            expectEqual(log.momentum.count, 0,
                         "a new touch with no glide in flight must be silent")
         }
 
         TestRunner.test("a slow release does not begin momentum") {
-            let (synth, seen) = recorder()
+            let (synth, log) = recorder()
             synth.handle(ScrollUpdate(phase: .ended, delta: Point(x: 0, y: 0),
                                       velocity: Point(x: 0, y: 0.2)))
-            check(!seen().contains(.begin), "a deliberate stop must not coast")
+            check(!log.momentum.contains(.begin), "a deliberate stop must not coast")
+            let before = log.momentum.count
             synth.cancelMomentum()
-            check(!seen().contains(where: { $0 == .end && seen().first == .begin }),
-                  "and cancelling afterwards must not invent a sequence")
+            expectEqual(log.momentum.count, before,
+                        "cancelling afterwards must not invent a sequence")
         }
     }
 }

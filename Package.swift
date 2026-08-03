@@ -25,6 +25,9 @@ let package = Package(
         ),
         // Stage 4 — two-finger scrolling.
         .executableTarget(name: "touch-scroll", dependencies: ["HIDCore", "TouchEvents"]),
+        // Diagnostic: what phase fields a real trackpad emits, so stopping
+        // momentum can be copied rather than guessed at.
+        .executableTarget(name: "scroll-probe", dependencies: []),
         // Diagnostic: measure what happens after CGEventPost.
         .executableTarget(name: "pointer-latency", dependencies: []),
         // Stage 5 recon — learn the undocumented gesture CGEvent encoding.
