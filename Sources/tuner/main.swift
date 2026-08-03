@@ -31,6 +31,29 @@ final class CurveView: NSView {
     private let sMin = 3.0, sMax = 1000.0
     private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 34, right: 12)
 
+    /// Colour for the live position and its trail.
+    ///
+    /// The curve is drawn in the system accent, and the two mean different
+    /// things — the curve is the setting, the dot is your finger — so they must
+    /// not look like one object. Rather than picking a fixed hue that could
+    /// collide with whatever accent the user has chosen, this rotates the
+    /// accent's own hue halfway round the wheel, which stays distinct from any
+    /// of them. Graphite has no hue to rotate, so it falls back to orange.
+    private var liveColor: NSColor {
+        guard let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) else {
+            return .systemOrange
+        }
+        var hue: CGFloat = 0, saturation: CGFloat = 0
+        var brightness: CGFloat = 0, alpha: CGFloat = 0
+        accent.getHue(&hue, saturation: &saturation,
+                      brightness: &brightness, alpha: &alpha)
+        guard saturation > 0.15 else { return .systemOrange }
+        return NSColor(hue: (hue + 0.5).truncatingRemainder(dividingBy: 1),
+                       saturation: min(1, saturation * 1.1),
+                       brightness: min(1, brightness * 1.05),
+                       alpha: 1)
+    }
+
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -101,9 +124,10 @@ final class CurveView: NSView {
         curve.stroke()
 
         // Trail, oldest faintest.
+        let live = liveColor
         for (index, speed) in trail.enumerated() where speed > sMin {
             let age = Double(index + 1) / Double(max(trail.count, 1))
-            NSColor.controlAccentColor.withAlphaComponent(0.05 + 0.25 * age).setFill()
+            live.withAlphaComponent(0.10 + 0.45 * age).setFill()
             let px = tuning.pixelsPerMillimetre(atSpeed: speed)
             let point = NSPoint(x: x(min(speed, sMax)),
                                 y: min(inset.top + h, max(inset.top, y(px))))
@@ -112,12 +136,12 @@ final class CurveView: NSView {
         }
 
         // The live position.
-        if let live = liveSpeed, live > sMin {
-            let px = tuning.pixelsPerMillimetre(atSpeed: live)
-            let point = NSPoint(x: x(min(live, sMax)),
+        if let speed = liveSpeed, speed > sMin {
+            let px = tuning.pixelsPerMillimetre(atSpeed: speed)
+            let point = NSPoint(x: x(min(speed, sMax)),
                                 y: min(inset.top + h, max(inset.top, y(px))))
 
-            NSColor.controlAccentColor.withAlphaComponent(0.5).setStroke()
+            live.withAlphaComponent(0.55).setStroke()
             let drop = NSBezierPath()
             drop.move(to: NSPoint(x: point.x, y: inset.top + h))
             drop.line(to: point)
@@ -125,18 +149,20 @@ final class CurveView: NSView {
             drop.setLineDash([3, 3], count: 2, phase: 0)
             drop.stroke()
 
+            // A ring of background colour so the dot stays legible where it
+            // crosses the curve, which is most of the time.
             NSColor.textBackgroundColor.setFill()
             NSBezierPath(ovalIn: NSRect(x: point.x - 6, y: point.y - 6,
                                         width: 12, height: 12)).fill()
-            NSColor.controlAccentColor.setFill()
+            live.setFill()
             NSBezierPath(ovalIn: NSRect(x: point.x - 4.5, y: point.y - 4.5,
                                         width: 9, height: 9)).fill()
 
             let text = NSAttributedString(
-                string: String(format: "%.0f mm/s → %.1f px/mm", live, px),
+                string: String(format: "%.0f mm/s → %.1f px/mm", speed, px),
                 attributes: [
                     .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
-                    .foregroundColor: NSColor.controlAccentColor,
+                    .foregroundColor: live,
                 ])
             // Flip the label inside the plot when the dot is near the edge.
             let tx = point.x + 10 + text.size().width > inset.left + w
