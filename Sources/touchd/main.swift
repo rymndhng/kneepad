@@ -61,11 +61,18 @@ func printUsage() {
       touchd --lead N               cancel firmware smoothing (default 0.25, 0=off)
       touchd --settle N             how hard a stop is snapped to (default 4)
       touchd --deadband N           mm treated as noise, not lag (default 0.25)
-      touchd --no-filter            disable the 1€ filter, keep lead
-      touchd --no-smoothing         disable the 1€ filter (alias)
+      touchd --filter               ENABLE the 1€ filter (off by default)
+      touchd --no-filter            disable it again
+      touchd --no-smoothing         disable it again (alias)
 
-      Jittery cursor when still  → lower --cutoff, or lower --beta
-      Laggy when moving fast     → raise --beta
+      The filter is OFF by default: this pad has no jitter worth
+      suppressing, and filtering an already-filtered signal only adds lag.
+      If you enable it, prefer --filter --settle 0 — the settle term
+      switches smoothing on and off as the error crosses --deadband, many
+      times a second, which reads as jerkiness.
+
+      Jittery cursor when still  → --filter, then lower --cutoff or --beta
+      Laggy when moving fast     → raise --beta, or turn the filter off
 
       Tuning --lead: it inverts the firmware's low-pass, and the error is
       asymmetric — too low leaves some drift after a stop but is otherwise
@@ -158,6 +165,7 @@ if minimal {
 }
 // Parsed after --minimal so a stage can be added back on its own, e.g.
 //   touchd --minimal --lead 2.5
+if args.contains("--filter") { smoothing.enabled = true }
 if args.contains("--no-filter") { smoothing.enabled = false }
 if let c = value("--cutoff") { smoothing.minCutoff = c }
 if let b = value("--beta") { smoothing.beta = b }

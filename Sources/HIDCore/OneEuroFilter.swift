@@ -140,7 +140,14 @@ public final class OneEuroPointFilter {
 
 /// Tuning for contact position smoothing.
 public struct SmoothingConfiguration {
-    public var enabled = true
+
+    /// Off by default.
+    ///
+    /// The filter exists to suppress sensor jitter, and this pad has none
+    /// worth suppressing — a resting finger is already still. What it did
+    /// contribute was lag while moving, and jerkiness from `settleGain` below.
+    /// Enable with `--filter` if a noisier unit turns up.
+    public var enabled = false
 
     /// Cancels the smoothing the trackpad firmware applies before we see the
     /// data — the cause of the deceleration tail after the finger stops.
