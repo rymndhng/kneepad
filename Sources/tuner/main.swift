@@ -508,7 +508,8 @@ final class TunerController: NSObject, NSWindowDelegate {
             return stack
         }
         let pointerControls = makeStack()
-        let gestureControls = makeStack()
+        let scrollControls = makeStack()
+        let tapControls = makeStack()
         var controls = pointerControls
 
         func heading(_ text: String) {
@@ -548,15 +549,6 @@ final class TunerController: NSObject, NSWindowDelegate {
             controls.addArrangedSubview(button)
         }
 
-        // Each tab needs its own; the marks are meaningless without it and a
-        // tab is not guaranteed to have been opened in order.
-        func addLegend() {
-            let legend = MarkerLegend()
-            controls.addArrangedSubview(legend)
-            legend.heightAnchor.constraint(equalToConstant: 12).isActive = true
-        }
-        addLegend()
-
         heading("Pointer")
         toggle("accel", "Acceleration", { $0.accelEnabled }, { $0.accelEnabled = $1 })
         slider("gain", "Gain", "px per mm at the reference speed", 4...40, 0,
@@ -587,8 +579,7 @@ final class TunerController: NSObject, NSWindowDelegate {
         slider("stop", "Cut below", "mm/s under which decaying motion is treated as tail",
                20...250, 0, { $0.stopSpeed }, { $0.stopSpeed = $1 })
 
-        controls = gestureControls
-        addLegend()
+        controls = scrollControls
 
         heading("Scroll")
         slider("scroll", "Gain", "px per mm", 8...80, 0,
@@ -597,6 +588,8 @@ final class TunerController: NSObject, NSWindowDelegate {
                { $0.scrollDecay }, { $0.scrollDecay = $1 })
         toggle("inertia", "Inertia", { $0.momentumEnabled }, { $0.momentumEnabled = $1 })
         toggle("natural", "Natural direction", { $0.naturalScroll }, { $0.naturalScroll = $1 })
+
+        controls = tapControls
 
         heading("Taps")
         toggle("tap", "Tap to click", { $0.tapEnabled }, { $0.tapEnabled = $1 })
@@ -638,45 +631,104 @@ final class TunerController: NSObject, NSWindowDelegate {
             return scroll
         }
 
-        let tabs = NSTabView()
-        for (label, stack) in [("Pointer", pointerControls),
-                               ("Taps & Scroll", gestureControls)] {
-            let item = NSTabViewItem(identifier: label)
-            item.label = label
-            item.view = scrolling(stack)
-            tabs.addTabViewItem(item)
-        }
-
         startTelemetry()
 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
         status.stringValue = "touchd applies changes as you move a slider"
 
-        let footer = NSStackView(views: [reset, NSView(), status])
+        // The plot belongs to the Pointer tab, not to the window. Taps and
+        // scrolling are not read off the acceleration curve, and leaving it on
+        // screen there implies a relationship that does not exist.
+        let plotPanel = NSStackView(views: [curve, readout])
+        plotPanel.orientation = .vertical
+        plotPanel.alignment = .leading
+        plotPanel.spacing = 8
+        plotPanel.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 12, right: 14)
+        curve.translatesAutoresizingMaskIntoConstraints = false
+        curve.widthAnchor.constraint(equalTo: plotPanel.widthAnchor, constant: -28).isActive = true
+        readout.widthAnchor.constraint(equalTo: plotPanel.widthAnchor, constant: -28).isActive = true
+
+        // The divider position is a constraint, not a call. setPosition runs
+        // before the split view has been laid out inside its tab, which leaves
+        // it with no size to divide and AppKit complaining about ambiguity.
+        // A low-priority width does the same job and still drags.
+        let pointerPane = scrolling(pointerControls)
+        let pointerSplit = NSSplitView()
+        pointerSplit.isVertical = true
+        pointerSplit.dividerStyle = .thin
+        pointerSplit.addArrangedSubview(pointerPane)
+        pointerSplit.addArrangedSubview(plotPanel)
+
+        let preferredWidth = pointerPane.widthAnchor.constraint(equalToConstant: 400)
+        preferredWidth.priority = NSLayoutConstraint.Priority(250)
+        NSLayoutConstraint.activate([
+            preferredWidth,
+            pointerPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
+            plotPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
+        ])
+
+        // Two equal columns. Neither list is long enough to need the full
+        // width, and side by side they fit without scrolling at all.
+        let gesturePanel = NSStackView(views: [scrolling(scrollControls),
+                                               scrolling(tapControls)])
+        gesturePanel.orientation = .horizontal
+        gesturePanel.distribution = .fillEqually
+        gesturePanel.spacing = 0
+
+        // A tab item resizes its view by autoresizing mask, so an autolayout
+        // view dropped straight in has no size to lay out against. Wrapping it
+        // in a plain container bridges the two.
+        func tabContent(_ view: NSView) -> NSView {
+            let container = NSView()
+            container.autoresizingMask = [.width, .height]
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                view.topAnchor.constraint(equalTo: container.topAnchor),
+                view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            return container
+        }
+
+        let tabs = NSTabView()
+        for (label, view) in [("Pointer", pointerSplit as NSView),
+                              ("Taps & Scroll", gesturePanel as NSView)] {
+            let item = NSTabViewItem(identifier: label)
+            item.label = label
+            item.view = tabContent(view)
+            tabs.addTabViewItem(item)
+        }
+
+        // Footer at window level: the reset covers both tabs, and the legend
+        // explains marks that appear on every slider in both of them.
+        let legend = MarkerLegend()
+        legend.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        legend.heightAnchor.constraint(equalToConstant: 12).isActive = true
+
+        let footer = NSStackView(views: [reset, legend, NSView(), status])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.distribution = .fill
+        footer.spacing = 14
+        footer.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 10, right: 14)
         footer.setHuggingPriority(.defaultLow, for: .horizontal)
 
-        let right = NSStackView(views: [curve, readout, footer])
-        right.orientation = .vertical
-        right.alignment = .leading
-        right.spacing = 8
-        right.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 12, right: 14)
-        curve.translatesAutoresizingMaskIntoConstraints = false
-        curve.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
-        readout.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
-        footer.widthAnchor.constraint(equalTo: right.widthAnchor, constant: -28).isActive = true
+        let root = NSStackView(views: [tabs, footer])
+        root.orientation = .vertical
+        root.alignment = .leading
+        root.spacing = 6
+        root.translatesAutoresizingMaskIntoConstraints = true
+        root.autoresizingMask = [.width, .height]
+        tabs.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        footer.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        // The tabs take the slack; the footer keeps its natural height.
+        tabs.setContentHuggingPriority(.defaultLow, for: .vertical)
+        footer.setContentHuggingPriority(.defaultHigh, for: .vertical)
 
-        let split = NSSplitView()
-        split.isVertical = true
-        split.dividerStyle = .thin
-        split.addArrangedSubview(tabs)
-        split.addArrangedSubview(right)
-
-        window.contentView = split
-        DispatchQueue.main.async { split.setPosition(400, ofDividerAt: 0) }
+        window.contentView = root
 
         refreshDisplay()
         installReleaseMonitor()
