@@ -113,7 +113,7 @@ final class CurveView: NSView {
         // along its own length. Text beside an axis has to be tied back to the
         // line it names; text lying on the line needs no tying at all.
         let guideLabel: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold),
+            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .regular),
             .foregroundColor: NSColor.labelColor,
         ]
 
@@ -134,46 +134,61 @@ final class CurveView: NSView {
             NSGraphicsContext.restoreGraphicsState()
         }
 
-        func dotted(_ path: NSBezierPath, emphasis: Bool) {
-            (emphasis ? NSColor.labelColor : NSColor.secondaryLabelColor).setStroke()
-            path.lineWidth = emphasis ? 1.2 : 1
+        func dotted(_ path: NSBezierPath) {
+            NSColor.secondaryLabelColor.setStroke()
+            path.lineWidth = 1
             path.setLineDash([1.5, 3], count: 2, phase: 0)
             path.stroke()
         }
 
         if tuning.accelEnabled {
-            // Horizontal: the rate below the knee, which is also where the
-            // curve crosses the pivot.
+            // Each rule runs from its axis to the curve and stops there. Past
+            // the intersection it would be describing a point the curve does
+            // not occupy, and the three meeting the curve is the whole content
+            // of the picture: the gain line and the pivot line cross exactly on
+            // it, which is what "the multiplier is 1 here" means.
+            let pivotX = x(min(max(tuning.accelPivot, sMin), sMax))
             let gainY = y(tuning.pointerGain)
-            let gainLine = NSBezierPath()
-            gainLine.move(to: NSPoint(x: inset.left, y: gainY))
-            gainLine.line(to: NSPoint(x: inset.left + w, y: gainY))
-            dotted(gainLine, emphasis: false)
-            NSAttributedString(string: String(format: "gain %.0f", tuning.pointerGain),
-                               attributes: guideLabel)
-                .draw(at: NSPoint(x: inset.left + 4, y: gainY - 12))
 
-            // Vertical: the knee, then the pivot over the top of it. Labels run
-            // up the line, starting clear of the x-axis.
-            let crowded = abs(x(knee) - x(tuning.accelPivot)) < 14
-            for (speed, caption, emphasis) in
-                [(knee, crowded ? "" : "knee \(Int(knee))", false),
-                 (tuning.accelPivot, "pivot \(Int(tuning.accelPivot))", true)]
+            if tuning.accelPivot > sMin {
+                let gainLine = NSBezierPath()
+                gainLine.move(to: NSPoint(x: inset.left, y: gainY))
+                gainLine.line(to: NSPoint(x: pivotX, y: gainY))
+                dotted(gainLine)
+
+                let text = NSAttributedString(
+                    string: String(format: "gain %.0f", tuning.pointerGain),
+                    attributes: guideLabel)
+                if text.size().width + 10 < pivotX - inset.left {
+                    text.draw(at: NSPoint(x: inset.left + 4, y: gainY - 12))
+                }
+            }
+
+            let crowded = abs(x(knee) - pivotX) < 14
+            for (speed, caption) in [(knee, crowded ? "" : "knee \(Int(knee))"),
+                                     (tuning.accelPivot, "pivot \(Int(tuning.accelPivot))")]
                 where speed > sMin && speed < sMax {
 
                 let px = x(speed)
+                let meets = y(tuning.pixelsPerMillimetre(atSpeed: speed))
                 let line = NSBezierPath()
-                line.move(to: NSPoint(x: px, y: inset.top))
-                line.line(to: NSPoint(x: px, y: inset.top + h))
-                dotted(line, emphasis: emphasis)
+                line.move(to: NSPoint(x: px, y: inset.top + h))
+                line.line(to: NSPoint(x: px, y: meets))
+                dotted(line)
 
                 guard !caption.isEmpty else { continue }
                 let text = NSAttributedString(string: caption, attributes: guideLabel)
+                // A label may overrun the top of its rule a little — it still
+                // reads as belonging to it — but not by so much that it looks
+                // detached, and never past the top of the plot. At the shipped
+                // settings the knee rule is 49px against a 43px label, so a
+                // rule-length guard would drop exactly the label most wanted.
+                let ruleLength = inset.top + h - meets
+                guard text.size().width < ruleLength + 24,
+                      text.size().width + 8 < h else { continue }
                 // The rotated strip ends at `x`, so this sits it immediately
-                // left of the rule rather than floating away from it. Skipped
-                // entirely if the plot is too short to hold the whole word.
-                guard text.size().width + 12 < h else { continue }
-                drawUpward(text, x: px - 2, bottom: inset.top + h - 6)
+                // left of the rule rather than floating away from it.
+                drawUpward(text, x: px - 2, bottom: inset.top + h - 4)
             }
         }
 
