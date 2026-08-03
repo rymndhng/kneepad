@@ -29,7 +29,7 @@ final class CurveView: NSView {
     var trail: [Double] = []
 
     private let sMin = 3.0, sMax = 1000.0
-    private let inset = NSEdgeInsets(top: 10, left: 40, bottom: 48, right: 12)
+    private let inset = NSEdgeInsets(top: 24, left: 40, bottom: 48, right: 12)
 
     /// Colour for the live position and its trail.
     ///
@@ -155,9 +155,11 @@ final class CurveView: NSView {
             // A steep exponent pushes the knee up towards the reference. When
             // the two labels would overprint, the knee keeps its tick and loses
             // its text — the reference is the one that anchors the curve.
-            let crowded = abs(x(knee) - x(tuning.accelReference)) < 52
+            // "260 pivot" is wider than the "x1" it replaced, so the two
+            // labels start overlapping sooner.
+            let crowded = abs(x(knee) - x(tuning.accelReference)) < 58
             axisMark(knee, crowded ? "" : "\(Int(knee)) knee", emphasis: false)
-            axisMark(tuning.accelReference, "\(Int(tuning.accelReference)) ×1",
+            axisMark(tuning.accelReference, "\(Int(tuning.accelReference)) pivot",
                      emphasis: true)
 
             // And the rate the reference produces, on the vertical axis.
@@ -231,6 +233,12 @@ final class CurveView: NSView {
         let axis = NSAttributedString(string: "finger speed — mm/s, log scale", attributes: label)
         axis.draw(at: NSPoint(x: inset.left + (w - axis.size().width) / 2,
                               y: inset.top + h + 32))
+
+        // The vertical axis, named above it rather than rotated alongside it.
+        // Rotated text in a flipped view is easy to get subtly wrong, and the
+        // plot has headroom at the top that this costs nothing to use.
+        NSAttributedString(string: "screen px per mm", attributes: label)
+            .draw(at: NSPoint(x: 4, y: 6))
     }
 
     private func niceStep(_ max: Double) -> Double {
