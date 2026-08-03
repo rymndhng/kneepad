@@ -26,6 +26,8 @@ func printUsage() {
       touchd --no-momentum          disable inertial scrolling
       touchd --no-tap               disable tap-to-click
       touchd --no-right-tap         two-finger tap does not right click
+      touchd --tap-time N           tap max duration (default 0.25s)
+      touchd --tap-travel N         tap max travel (default 2mm)
       touchd --two-tap-time N       two-finger tap max duration (default 0.6s)
       touchd --two-tap-travel N     two-finger tap max travel (default 4mm)
       touchd --reverse              invert scroll direction
@@ -77,8 +79,15 @@ let tapEnabled = !args.contains("--no-tap")
 // Separable from tap-to-click: right-clicking by two-finger tap is the part
 // people most often want off on its own, because it can fire during scrolls.
 let rightTapEnabled = tapEnabled && !args.contains("--no-right-tap")
-let twoTapTime = value("--two-tap-time")
-let twoTapTravel = value("--two-tap-travel")
+// Built here rather than beside the rest of the pipeline so the startup
+// summary can print its real values instead of restating the defaults, which
+// is how the summary came to disagree with the code once already.
+let pointerRecognizer = PointerRecognizer()
+pointerRecognizer.twoFingerTapEnabled = rightTapEnabled
+if let t = value("--tap-time") { pointerRecognizer.tapMaxDuration = t }
+if let d = value("--tap-travel") { pointerRecognizer.tapMaxTravel = d }
+if let t = value("--two-tap-time") { pointerRecognizer.twoFingerTapMaxDuration = t }
+if let d = value("--two-tap-travel") { pointerRecognizer.twoFingerTapMaxTravel = d }
 
 let showStats = args.contains("--stats")
 
@@ -179,12 +188,20 @@ print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
              scrollConfig.gain,
              scrollConfig.naturalDirection ? "natural" : "reversed",
              scrollConfig.momentumDecayTime))
-print("Tap to click  \(tapEnabled ? "on" : "off")")
-// Seconds, matching the unit --two-tap-time is given in. Printing ms here
+// Times in seconds, matching the unit the flags take. Printing ms here once
 // invited passing 500 back in, which parses as a 500-second window.
-print(String(format: "Two-finger    %@  (max %.2fs, %.1f mm)",
-             rightTapEnabled ? "tap → right click" : "right click off",
-             twoTapTime ?? 0.6, twoTapTravel ?? 4.0))
+if tapEnabled {
+    print(String(format: "Tap to click  left, max %.2fs and %.1f mm",
+                 pointerRecognizer.tapMaxDuration, pointerRecognizer.tapMaxTravel))
+    print(String(format: "Two-finger    %@",
+                 rightTapEnabled
+                     ? String(format: "right click, max %.2fs and %.1f mm",
+                              pointerRecognizer.twoFingerTapMaxDuration,
+                              pointerRecognizer.twoFingerTapMaxTravel)
+                     : "right click off"))
+} else {
+    print("Tap to click  off")
+}
 if dryRun { print("Dry run       recognising only, posting nothing") }
 print()
 
@@ -214,10 +231,6 @@ do {
 let tracker = ContactTracker(layout: session.layout)
 tracker.smoothing = smoothing
 let scrollRecognizer = ScrollRecognizer()
-let pointerRecognizer = PointerRecognizer()
-pointerRecognizer.twoFingerTapEnabled = rightTapEnabled
-if let twoTapTime { pointerRecognizer.twoFingerTapMaxDuration = twoTapTime }
-if let twoTapTravel { pointerRecognizer.twoFingerTapMaxTravel = twoTapTravel }
 let scrollSynthesizer = ScrollSynthesizer(configuration: scrollConfig)
 let pointerSynthesizer = PointerSynthesizer(configuration: pointerConfig)
 
