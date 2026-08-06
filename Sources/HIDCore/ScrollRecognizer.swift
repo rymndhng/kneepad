@@ -32,7 +32,21 @@ public final class ScrollRecognizer {
     public var activationDistance = 0.73
 
     /// If the gap between fingers changes faster than the centroid moves by
-    /// this ratio, treat the motion as a pinch and refuse to scroll.
+    /// this ratio, *and* the fingers are moving against each other, treat the
+    /// motion as a pinch and refuse to scroll.
+    ///
+    /// The second condition is not optional. Fingers rest side by side, so the
+    /// line between them is horizontal: a vertical scroll hardly changes the
+    /// gap at all — 20mm apart, moved 1mm up, the distance grows by 0.025mm —
+    /// while a sideways swipe changes it one-for-one with any difference
+    /// between the two fingers. And the centroid moves only half as far as a
+    /// finger that leads, so a 2mm lead reads as 1mm of travel against 2mm of
+    /// spread: rejected, every time, at exactly the moment of activation.
+    ///
+    /// So this test on its own rejected sideways swipes as pinches, and only
+    /// the geometry of vertical scrolling hid it. What actually distinguishes a
+    /// pinch is that the fingers move in *opposite* directions; one finger
+    /// leading the other is not a pinch however much the gap changes.
     public var pinchRejectionRatio = 1.2
 
     /// Require both contacts to be confident before scrolling.
@@ -67,8 +81,11 @@ public final class ScrollRecognizer {
 
     private enum State {
         case idle
-        /// Two fingers down, not yet moved far enough to commit.
-        case pending(origin: TwoFingerState, spread: Double)
+        /// Two fingers down, not yet moved far enough to commit. Each finger's
+        /// starting position is kept by track ID, because telling a pinch from
+        /// a swipe needs to know which way each one went, not just where the
+        /// pair ended up.
+        case pending(origin: TwoFingerState, positions: [Int: Point])
         case scrolling(last: Point)
     }
 
@@ -148,6 +165,30 @@ public final class ScrollRecognizer {
         return Point(x: displacement.x / elapsed, y: displacement.y / elapsed)
     }
 
+    private func positions(of tracks: [Track]) -> [Int: Point] {
+        Dictionary(tracks.map { ($0.id, $0.position) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Did the fingers travel in opposing directions since the gesture began?
+    ///
+    /// This is what a pinch is. A swipe where one finger leads gives a dot
+    /// product of zero — the other finger has not moved — and both fingers
+    /// going the same way gives a positive one; neither is a pinch.
+    ///
+    /// Returns true if the starting positions are not available, which happens
+    /// only when a track was replaced mid-gesture. Falling back to the old
+    /// spread test there keeps the conservative behaviour for a case we cannot
+    /// judge.
+    private func movingAgainstEachOther(_ tracks: [Track],
+                                        from origins: [Int: Point]) -> Bool {
+        guard tracks.count == 2,
+              let startA = origins[tracks[0].id],
+              let startB = origins[tracks[1].id] else { return true }
+        let a = tracks[0].position - startA
+        let b = tracks[1].position - startB
+        return a.x * b.x + a.y * b.y < 0
+    }
+
     /// Mean velocity of the two contacts — the pair moves as one unit.
     private func meanVelocity(_ tracks: [Track]) -> Point {
         guard !tracks.isEmpty else { return Point(x: 0, y: 0) }
@@ -173,19 +214,21 @@ public final class ScrollRecognizer {
 
         switch state {
         case .idle:
-            state = .pending(origin: now, spread: now.spread)
+            state = .pending(origin: now, positions: positions(of: usable))
             record(now.centroid, dt)
             return nil
 
-        case .pending(let origin, let startSpread):
+        case .pending(let origin, let startPositions):
             record(now.centroid, dt)
             let travel = (now.centroid - origin.centroid).magnitude
             guard travel >= activationDistance else { return nil }
 
-            // Fingers converging or diverging faster than they translate is a
-            // pinch; bail out rather than scrolling the view sideways.
-            let spreadChange = abs(now.spread - startSpread)
-            if spreadChange > travel * pinchRejectionRatio {
+            // Fingers converging or diverging faster than they translate, and
+            // doing it against each other, is a pinch; bail out rather than
+            // scrolling the view sideways.
+            let spreadChange = abs(now.spread - origin.spread)
+            if spreadChange > travel * pinchRejectionRatio,
+               movingAgainstEachOther(usable, from: startPositions) {
                 state = .idle
                 history.removeAll()
                 return nil

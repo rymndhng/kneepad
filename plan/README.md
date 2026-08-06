@@ -257,7 +257,23 @@ Design notes:
 - **Activation distance** (1 mm default) stops a resting pair from nudging
   the view.
 - **Pinch rejection**: if the gap between fingers changes faster than the
-  centroid translates, it's a pinch, not a scroll — refuse to engage.
+  centroid translates **and the fingers are moving against each other**, it's a
+  pinch, not a scroll — refuse to engage.
+
+  The second condition was missing at first, and it made sideways swipes fire
+  only sometimes. Fingers rest side by side, so the line between them is
+  horizontal. A vertical scroll hardly changes the gap — 20 mm apart, moved
+  1 mm up, the distance grows by 0.025 mm — but a sideways swipe changes it
+  one-for-one with any difference between the two fingers. The centroid moves
+  only *half* as far as a finger that leads, so a 2 mm lead reads as 1 mm of
+  travel against 2 mm of spread and is rejected at the exact moment of
+  activation. Fingers never start together, so the rejection landed at random.
+
+  Only the geometry of vertical scrolling hid this: the test was wrong for the
+  whole horizontal axis and right for the one it was tuned on. What actually
+  defines a pinch is the fingers travelling in *opposite* directions — a
+  negative dot product of their displacements. One finger leading gives zero,
+  both moving together gives a positive number, and neither is a pinch.
 - **Sub-pixel residual** is carried between events so slow drags aren't
   truncated to zero by integer pixel deltas.
 - Velocity is carried in the recognizer's `scrolling` state, because by the

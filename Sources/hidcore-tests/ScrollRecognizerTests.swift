@@ -94,6 +94,45 @@ func runScrollRecognizerTests() {
             check(!recognizer.isScrolling, "must not have engaged")
         }
 
+        // Fingers rest side by side, so the line between them is horizontal.
+        // A vertical scroll barely changes the gap — 20mm apart, moved 1mm up,
+        // the distance grows by 0.025mm — but a horizontal swipe changes it
+        // one-for-one with any difference between the two fingers. Since
+        // fingers never start together, the pinch test saw every swipe as a
+        // pinch, and only the geometry of vertical scrolling hid it.
+        TestRunner.test("an uneven pinch is still rejected") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+            // Both fingers move, in opposite directions, one further than the
+            // other — so the centroid drifts as well as the gap opening.
+            expectNil(step(tracker, recognizer,
+                           [contact(0, 4, 10), contact(1, 32, 10)], at: 1000),
+                      "opposing motion is a pinch however lopsided")
+            check(!recognizer.isScrolling, "must not have engaged")
+        }
+
+        TestRunner.test("a sideways swipe with one finger leading still scrolls") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+
+            // Swipe left. The left finger leads by 2mm; the other has not moved
+            // yet. Centroid travel 1mm, gap change 2mm.
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 8, 10), contact(1, 30, 10)], at: 1000),
+                                     "a leading finger is not a pinch")
+            check(update.phase == .began, "expected began, got \(update.phase)")
+            check(update.delta.x < 0, "swipe went left")
+        }
+
+        TestRunner.test("fingers moving together sideways scroll") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 8, 10), contact(1, 28, 10)], at: 1000))
+            check(update.phase == .began, "expected began")
+            expectClose(update.delta.x, -2, 0.001, "centroid moved 2mm left")
+        }
+
         TestRunner.test("one finger never scrolls") {
             let tracker = makeTracker(), recognizer = ScrollRecognizer()
             _ = step(tracker, recognizer, [contact(0, 10, 10)], at: 0)
