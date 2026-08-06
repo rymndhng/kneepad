@@ -1,12 +1,20 @@
 import AppKit
+import TouchDriver
 import TouchEvents
 
-// A tuning panel for touchd.
+// Teach Touch — the trackpad driver and its tuning panel, in one app.
 //
-// Writes ~/Library/Application Support/teach-touch/tuning.json; touchd watches
-// that file and applies changes without restarting. So the loop is: move a
-// slider, move your finger, feel the difference. Every constant in this project
-// was arrived at by hand, and until now that loop was edit, rebuild, restart.
+// The driver runs for as long as this app is open: launching it makes the pad
+// work, quitting it puts the pad back in mouse mode. Shipping the panel apart
+// from the driver meant every session started by remembering to launch a
+// second thing in a terminal, and every permission problem had to be diagnosed
+// twice, against two binaries with separate TCC grants.
+//
+// So the loop is now: open the app, move a slider, move your finger, feel the
+// difference. Settings still go to
+// ~/Library/Application Support/teach-touch/tuning.json, so a headless
+// `touchd` LaunchAgent picks up the same values — but they are applied to the
+// in-process driver directly, without waiting on a file watcher.
 //
 // AppKit rather than SwiftUI because this toolchain has no macro plugins, so
 // @State does not resolve — the same gap that rules out XCTest here.
@@ -39,7 +47,45 @@ final class CurveView: NSView {
     /// collide with whatever accent the user has chosen, this rotates the
     /// accent's own hue halfway round the wheel, which stays distinct from any
     /// of them. Graphite has no hue to rotate, so it falls back to orange.
-    var indicatorColor: NSColor { liveColor }
+    /// Cached, because resolving it is not cheap and it is asked for on every
+    /// telemetry tick as well as every draw. `controlAccentColor` is a dynamic
+    /// colour: resolving it goes through the appearance and into CoreUI's
+    /// theme store, which showed up in a profile at 60 Hz. It changes only
+    /// when the user picks a different accent or the appearance flips, and
+    /// both post a notification.
+    var indicatorColor: NSColor {
+        if let cachedLiveColor { return cachedLiveColor }
+        let colour = liveColor
+        cachedLiveColor = colour
+        return colour
+    }
+
+    private var cachedLiveColor: NSColor?
+
+    private func forgetCachedColors() {
+        cachedLiveColor = nil
+        needsDisplay = true
+    }
+
+    /// Light ⇄ dark, or anything else that changes how a dynamic colour
+    /// resolves.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        forgetCachedColors()
+    }
+
+    private var observingSystemColors = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // The accent colour itself, changed in System Settings. Registered
+        // here rather than in init because this runs more than once.
+        guard !observingSystemColors else { return }
+        observingSystemColors = true
+        NotificationCenter.default.addObserver(
+            forName: NSColor.systemColorsDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in self?.forgetCachedColors() }
+    }
 
     private var liveColor: NSColor {
         guard let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) else {
@@ -207,7 +253,7 @@ final class CurveView: NSView {
         curve.stroke()
 
         // Trail, oldest faintest.
-        let live = liveColor
+        let live = indicatorColor
         for (index, speed) in trail.enumerated() where speed > sMin {
             let age = Double(index + 1) / Double(max(trail.count, 1))
             live.withAlphaComponent(0.10 + 0.45 * age).setFill()
@@ -503,6 +549,14 @@ final class LiveReadout: NSStackView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Assigning to `stringValue` invalidates the field whether or not the
+    /// text changed, so an idle panel showing four dashes would still redraw
+    /// them twelve times a second forever. Only write on a real change.
+    private static func set(_ field: NSTextField, _ text: String, _ color: NSColor) {
+        if field.stringValue != text { field.stringValue = text }
+        if field.textColor != color { field.textColor = color }
+    }
+
     func update(speed value: Double, tuning: Tuning, touching: Bool, accent: NSColor) {
         let now = TelemetryChannel.now
         if touching, value > peakSpeed || now - peakAt > peakHold {
@@ -513,32 +567,27 @@ final class LiveReadout: NSStackView {
         tick += 1
         guard tick % 5 == 0 else { return }
 
+        let set = LiveReadout.set
+
         guard touching else {
-            speed.stringValue = "—"
-            rate.stringValue = "—"
-            zone.stringValue = "—"
-            speed.textColor = .tertiaryLabelColor
-            zone.textColor = .tertiaryLabelColor
-            if now - peakAt > peakHold { peak.stringValue = "—" }
+            set(speed, "—", .tertiaryLabelColor)
+            set(rate, "—", .labelColor)
+            set(zone, "—", .tertiaryLabelColor)
+            if now - peakAt > peakHold { set(peak, "—", .labelColor) }
             return
         }
 
         let px = tuning.pixelsPerMillimetre(atSpeed: value)
-        speed.stringValue = String(format: "%.0f mm/s", value)
-        rate.stringValue = String(format: "%.1f px/mm", px)
-        peak.stringValue = String(format: "%.0f mm/s", peakSpeed)
-        speed.textColor = accent
-        peak.textColor = .labelColor
-        rate.textColor = .labelColor
+        set(speed, String(format: "%.0f mm/s", value), accent)
+        set(rate, String(format: "%.1f px/mm", px), .labelColor)
+        set(peak, String(format: "%.0f mm/s", peakSpeed), .labelColor)
 
         // The question the knee is set to answer: is this gesture being
         // amplified, or is it inside the flat zone?
         if value < tuning.accelerationKnee {
-            zone.stringValue = "flat"
-            zone.textColor = .secondaryLabelColor
+            set(zone, "flat", .secondaryLabelColor)
         } else {
-            zone.stringValue = String(format: "×%.2f", px / tuning.pointerGain)
-            zone.textColor = accent
+            set(zone, String(format: "×%.2f", px / tuning.pointerGain), accent)
         }
     }
 }
@@ -559,6 +608,7 @@ final class TunerController: NSObject, NSWindowDelegate {
     private var tuning = Tuning.load() ?? Tuning()
     private let curve = CurveView()
     private let status = NSTextField(labelWithString: "")
+    private let driverStatus = NSTextField(labelWithString: "")
     private let readout = LiveReadout()
     let window: NSWindow
 
@@ -705,7 +755,9 @@ final class TunerController: NSObject, NSWindowDelegate {
 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
-        status.stringValue = "touchd applies changes as you move a slider"
+        status.stringValue = "Changes apply as you move a slider"
+        driverStatus.font = .systemFont(ofSize: 11)
+        driverStatus.textColor = .secondaryLabelColor
 
         // The plot belongs to the Pointer tab, not to the window. Taps and
         // scrolling are not read off the acceleration curve, and leaving it on
@@ -794,7 +846,7 @@ final class TunerController: NSObject, NSWindowDelegate {
         legend.widthAnchor.constraint(equalToConstant: 150).isActive = true
         legend.heightAnchor.constraint(equalToConstant: 12).isActive = true
 
-        let footer = NSStackView(views: [legend, NSView(), status])
+        let footer = NSStackView(views: [legend, driverStatus, NSView(), status])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.distribution = .fill
@@ -818,6 +870,151 @@ final class TunerController: NSObject, NSWindowDelegate {
 
         refreshDisplay()
         installReleaseMonitor()
+        startDriver()
+    }
+
+    // MARK: - The embedded driver
+
+    private var driver: TouchDriver?
+    private var retryTimer: Timer?
+    private var promptedForAccessibility = false
+
+    /// Start driving the trackpad, or explain why we cannot.
+    ///
+    /// Failures here are all recoverable by the user — plug the board in,
+    /// grant a permission, quit the other copy — so nothing is fatal and a
+    /// retry timer keeps trying quietly rather than making them relaunch.
+    private func startDriver() {
+        guard driver == nil else { return }
+
+        // Two drivers both flipping Input Mode and both posting events is the
+        // one failure mode that costs you the cursor entirely. If a LaunchAgent
+        // copy is already running, leave it alone — the panel still tunes it
+        // through the file, which is what it did before it grew a driver.
+        guard !TouchDriver.isAnotherDriverRunning() else {
+            show("Another touchd is running — tuning that one", .systemOrange)
+            scheduleRetry()
+            return
+        }
+
+        var options = TouchDriver.Options()
+        tuning.apply(to: &options.pointer)
+        tuning.apply(to: &options.scroll)
+        options.tapEnabled = tuning.tapEnabled
+
+        let driver = TouchDriver(options: options)
+        tuning.apply(to: driver.pointerRecognizer)
+        // Console rather than the window: these are per-report diagnostics and
+        // a startup transcript, neither of which belongs in a one-line footer.
+        driver.onLog = { NSLog("teach-touch: %@", $0) }
+        driver.onForeignReport = { [weak self] reportID in
+            self?.show("Device fell back to mouse mode (report \(reportID))", .systemOrange)
+        }
+
+        do {
+            try driver.start()
+            self.driver = driver
+            retryTimer?.invalidate()
+            retryTimer = nil
+            show("Trackpad live", .systemGreen)
+            startHealthReporting()
+        } catch DriverError.accessibilityDenied {
+            // Without this, CGEventPost silently does nothing — no error, no
+            // events. The grant lands on a running process, so once it is
+            // given the retry below picks it up without a relaunch.
+            show("Needs Accessibility — System Settings ▸ Privacy & Security", .systemRed)
+            if !promptedForAccessibility {
+                promptedForAccessibility = true
+                _ = ScrollSynthesizer.hasAccessibilityPermission(prompt: true)
+            }
+            scheduleRetry()
+        } catch DriverError.deviceNotFound {
+            show("Trackpad not found — is the board plugged in?", .secondaryLabelColor)
+            scheduleRetry()
+        } catch {
+            // Most often Input Monitoring, which unlike Accessibility is only
+            // consulted when the device is opened, and only takes effect for
+            // this app once it is relaunched.
+            show("Could not open the trackpad: \(error)", .systemRed)
+            NSLog("teach-touch: driver failed to start: %@", "\(error)")
+            scheduleRetry()
+        }
+    }
+
+    /// Keep trying, slowly. Covers plugging the board in, granting a
+    /// permission, or quitting the other driver, all without a relaunch.
+    private func scheduleRetry() {
+        guard retryTimer == nil else { return }
+        let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
+            self?.startDriver()
+        }
+        // Common modes: a retry that only fires in the default mode stalls for
+        // as long as a menu is open or a slider is held.
+        RunLoop.main.add(timer, forMode: .common)
+        retryTimer = timer
+    }
+
+    private var healthTimer: Timer?
+    private var worstGap = 0.0
+    private var worstGapAt = Date.distantPast
+    private var worstHandler = 0.0
+    private var worstHandlerAt = Date.distantPast
+
+    /// Report the frame rate the driver is actually seeing, once a second.
+    ///
+    /// Worth a permanent line in a panel about feel: "scrolling lags" has two
+    /// completely different causes — frames not arriving, or us not keeping up
+    /// with them — and they are indistinguishable by hand.
+    private func startHealthReporting() {
+        guard healthTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self, let health = driver?.health() else { return }
+
+            // Hold the worst reading for half a minute. The lag being chased
+            // happens while this window is behind something else, so a value
+            // that only survives 1.5 seconds is gone before it can be read.
+            let now = Date()
+            if health.worstGapMs > worstGap || now.timeIntervalSince(worstGapAt) > 30 {
+                worstGap = health.worstGapMs
+                worstGapAt = now
+            }
+            if health.worstHandlerMs > worstHandler
+                || now.timeIntervalSince(worstHandlerAt) > 30 {
+                worstHandler = health.worstHandlerMs
+                worstHandlerAt = now
+            }
+
+            let rate = String(format: "%.0f Hz", health.reportRateHz)
+            let budget = 1000 / max(health.reportRateHz, 1)
+            if worstGap > 3 * budget {
+                show(String(format: "Trackpad live · %@ · frames late by %.0f ms",
+                            rate, worstGap), .systemOrange)
+            } else if worstHandler > budget / 2 {
+                show(String(format: "Trackpad live · %@ · handler %.1f ms",
+                            rate, worstHandler), .systemOrange)
+            } else {
+                show("Trackpad live · \(rate)", .systemGreen)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        healthTimer = timer
+    }
+
+    /// Put the pad back in mouse mode. Skipping this leaves it in multitouch
+    /// with nothing decoding it, which means no cursor at all.
+    func stopDriver() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+        healthTimer?.invalidate()
+        healthTimer = nil
+        driver?.stop()
+        driver = nil
+    }
+
+    private func show(_ message: String, _ color: NSColor) {
+        guard driverStatus.stringValue != message else { return }
+        driverStatus.stringValue = message
+        driverStatus.textColor = color
     }
 
     private var idleWrite: Timer?
@@ -848,6 +1045,12 @@ final class TunerController: NSObject, NSWindowDelegate {
     private func apply(save: Bool = true) {
         // The plot always tracks the slider; only the file waits.
         refreshDisplay()
+        // The embedded driver takes every change immediately. The reason the
+        // file write waits for the release — that a continuous slider floods
+        // the watcher with values passed through on the way to the intended
+        // one — does not apply in process, so the feel changes under your
+        // finger while you drag.
+        driver?.apply(tuning)
         idleWrite?.invalidate()
         guard save else {
             pending = true
@@ -874,32 +1077,81 @@ final class TunerController: NSObject, NSWindowDelegate {
     /// know about, anything watching it. Reopening on failure covers the panel
     /// being started before the driver.
     private func startTelemetry() {
-        telemetryTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60,
-                                              repeats: true) { [weak self] _ in
-            guard let self else { return }
-            if telemetry == nil { telemetry = TelemetryChannel(writable: false) }
-            guard let telemetry, telemetry.isLive() else {
-                if curve.liveSpeed != nil { curve.liveSpeed = nil }
-                if !curve.trail.isEmpty { curve.trail.removeAll(); curve.needsDisplay = true }
-                readout.update(speed: 0, tuning: tuning, touching: false,
-                               accent: curve.indicatorColor)
-                return
-            }
+        // Common modes, or the plot freezes for the whole of a slider drag —
+        // which is exactly when it is being watched.
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            self?.pollTelemetry()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        telemetryTimer = timer
+    }
 
-            let sample = telemetry.read()
-            let touching = sample.contacts > 0 && sample.speed > 0
-            curve.liveSpeed = touching ? sample.speed : nil
-            readout.update(speed: sample.speed, tuning: tuning, touching: touching,
+    private func pollTelemetry() {
+        if telemetry == nil { telemetry = TelemetryChannel(writable: false) }
+        guard let telemetry, telemetry.isLive() else {
+            setLiveSpeed(nil)
+            if !curve.trail.isEmpty { curve.trail.removeAll(); curve.needsDisplay = true }
+            readout.update(speed: 0, tuning: tuning, touching: false,
                            accent: curve.indicatorColor)
-            if touching {
-                curve.trail.append(sample.speed)
-                if curve.trail.count > 90 { curve.trail.removeFirst() }   // ~1.5s
-            } else if !curve.trail.isEmpty {
-                curve.trail.removeFirst()
-                curve.needsDisplay = true
-            }
+            return
+        }
+
+        let sample = telemetry.read()
+        let touching = sample.contacts > 0 && sample.speed > 0
+        setLiveSpeed(touching ? sample.speed : nil)
+        readout.update(speed: sample.speed, tuning: tuning, touching: touching,
+                       accent: curve.indicatorColor)
+        if touching {
+            curve.trail.append(sample.speed)
+            if curve.trail.count > 90 { curve.trail.removeFirst() }   // ~1.5s
+        } else if !curve.trail.isEmpty {
+            curve.trail.removeFirst()
+            curve.needsDisplay = true
         }
     }
+
+    /// Assign only on a change.
+    ///
+    /// `liveSpeed` redraws the whole plot when set, and the driver publishes
+    /// continuously, so a resting hand used to repaint the curve sixty times a
+    /// second to show the same nothing.
+    private func setLiveSpeed(_ speed: Double?) {
+        guard curve.liveSpeed != speed else { return }
+        curve.liveSpeed = speed
+    }
+
+    // MARK: Drawing only when there is something to see
+
+    /// True when the plot is actually on screen: not minimised, not hidden,
+    /// not completely covered by another window.
+    private var plotIsVisible: Bool {
+        !window.isMiniaturized && window.occlusionState.contains(.visible)
+    }
+
+    /// Stop polling when nobody can see the result.
+    ///
+    /// This is display work only — the driver keeps running, because the point
+    /// of the app is that the trackpad works while it is open. But the poll
+    /// runs at 60 Hz and repaints a curve, a trail and four readouts, and none
+    /// of that is worth a single cycle behind another window or in the Dock.
+    private func updatePolling() {
+        let wanted = plotIsVisible
+        guard wanted != (telemetryTimer != nil) else { return }
+        if wanted {
+            startTelemetry()
+        } else {
+            telemetryTimer?.invalidate()
+            telemetryTimer = nil
+            // Come back showing the present rather than a frozen gesture from
+            // whenever the window was last covered.
+            curve.liveSpeed = nil
+            curve.trail.removeAll()
+        }
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) { updatePolling() }
+    func windowDidMiniaturize(_ notification: Notification) { updatePolling() }
+    func windowDidDeminiaturize(_ notification: Notification) { updatePolling() }
 
     private func write() {
         idleWrite?.invalidate()
@@ -937,9 +1189,98 @@ private extension NSButton {
 
 // MARK: - Launch
 
+/// The menu bar, in code.
+///
+/// ⌘Q and ⌘W are not built into AppKit — they are key equivalents on menu
+/// items, and an app assembled in code rather than from a nib has no menus for
+/// them to be on. Without this the shortcuts do nothing at all, which is worse
+/// than it sounds for this app in particular: quitting is how the trackpad is
+/// handed back to mouse mode.
+func makeMainMenu() -> NSMenu {
+    let name = "Teach Touch"
+    let mainMenu = NSMenu()
+
+    let appItem = NSMenuItem()
+    mainMenu.addItem(appItem)
+    let appMenu = NSMenu()
+    appItem.submenu = appMenu
+    appMenu.addItem(withTitle: "About \(name)",
+                    action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+                    keyEquivalent: "")
+    appMenu.addItem(.separator())
+    appMenu.addItem(withTitle: "Hide \(name)",
+                    action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+    let hideOthers = appMenu.addItem(withTitle: "Hide Others",
+                                     action: #selector(NSApplication.hideOtherApplications(_:)),
+                                     keyEquivalent: "h")
+    hideOthers.keyEquivalentModifierMask = [.command, .option]
+    appMenu.addItem(withTitle: "Show All",
+                    action: #selector(NSApplication.unhideAllApplications(_:)),
+                    keyEquivalent: "")
+    appMenu.addItem(.separator())
+    appMenu.addItem(withTitle: "Quit \(name)",
+                    action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+    // The item's own title is what `windowsMenu` is looked up by; the submenu's
+    // title is what gets drawn.
+    let windowItem = NSMenuItem()
+    windowItem.title = "Window"
+    mainMenu.addItem(windowItem)
+    let windowMenu = NSMenu(title: "Window")
+    windowItem.submenu = windowMenu
+    windowMenu.addItem(withTitle: "Close",
+                       action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+    windowMenu.addItem(withTitle: "Minimize",
+                       action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+    windowMenu.addItem(withTitle: "Zoom",
+                       action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+
+    return mainMenu
+}
+
+/// Owns shutdown. The driver leaves the pad in multitouch mode while it runs,
+/// and nothing else on the system decodes that, so failing to restore mouse
+/// mode on the way out costs the user their cursor until they re-run something.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let controller = TunerController()
+    private var signalSources: [DispatchSourceSignal] = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // AppKit terminates on SIGTERM without running applicationWillTerminate,
+        // so `pkill`, a logout, or anything else being tidy would leave the pad
+        // in multitouch mode with nothing decoding it — no cursor. SIGINT is
+        // for running the app straight from a terminal with `swift run tuner`.
+        for number in [SIGTERM, SIGINT] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { [weak self] in
+                self?.controller.stopDriver()
+                exit(0)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controller.stopDriver()
+    }
+
+    /// Reopening from the Dock brings the panel back rather than doing nothing.
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows: Bool) -> Bool {
+        controller.window.makeKeyAndOrderFront(nil)
+        return true
+    }
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
-let controller = TunerController()
-controller.window.makeKeyAndOrderFront(nil)
+app.mainMenu = makeMainMenu()
+// Names the menu AppKit adds its own window list to.
+app.windowsMenu = app.mainMenu?.item(withTitle: "Window")?.submenu
+let delegate = AppDelegate()
+app.delegate = delegate
+delegate.controller.window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 app.run()

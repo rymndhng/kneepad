@@ -34,15 +34,19 @@ let package = Package(
         .executableTarget(name: "gesture-probe", dependencies: ["HIDCore", "TouchEvents"]),
         // Stage 5 — post candidate gesture events and see what responds.
         .executableTarget(name: "gesture-emit", dependencies: ["HIDCore", "TouchEvents"]),
-        // Stages 3 + 4 — the actual driver: pointer, taps and scrolling.
-        .executableTarget(name: "touchd", dependencies: ["HIDCore", "TouchEvents"]),
-        // Visual tuning panel. Writes the file touchd watches. AppKit rather
-        // than SwiftUI: this Command Line Tools install has no macro plugins,
-        // so @State and friends do not resolve — the same gap that rules out
+        // Stages 3 + 4 — the driver loop itself, as a library so both front
+        // ends run the same code: the `touchd` command for a headless
+        // LaunchAgent, and the tuning app, which runs one while it is open.
+        .target(name: "TouchDriver", dependencies: ["HIDCore", "TouchEvents"]),
+        // Headless front end.
+        .executableTarget(name: "touchd", dependencies: ["HIDCore", "TouchEvents", "TouchDriver"]),
+        // The app: tuning panel plus an embedded driver. AppKit rather than
+        // SwiftUI: this Command Line Tools install has no macro plugins, so
+        // @State and friends do not resolve — the same gap that rules out
         // XCTest here.
         .executableTarget(
             name: "tuner",
-            dependencies: ["TouchEvents"],
+            dependencies: ["TouchEvents", "TouchDriver"],
             linkerSettings: [.linkedFramework("AppKit")]
         ),
         // Tests run as a plain executable: this Command Line Tools install has

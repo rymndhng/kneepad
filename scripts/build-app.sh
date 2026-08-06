@@ -2,24 +2,33 @@
 # Wraps the `tuner` executable in a .app bundle so it can be launched from
 # Finder or Spotlight rather than a terminal.
 #
+# The app is the whole product now: it drives the trackpad for as long as it is
+# open, and the sliders tune the driver running inside it. `touchd` remains as
+# the headless front end for a LaunchAgent.
+#
 # A bare SwiftPM executable can draw a window, but macOS treats it as a
 # faceless process: no Dock icon, no menu bar ownership, and it cannot be
-# focused properly. The bundle is what makes it a real app.
+# focused properly. The bundle is what makes it a real app — and TCC will not
+# hold a permission grant for an unbundled binary in a build directory.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP="build/Teach Touch Tuner.app"
+APP="build/Teach Touch.app"
 VERSION="1.0"
 
-echo "Building tuner (release)…"
+echo "Building the app (release)…"
 swift build -c release --product tuner
+
+# This toolchain puts release output under .build/out/Products/Release rather
+# than .build/release, so ask rather than assume.
+RELEASE_DIR="$(swift build -c release --show-bin-path)"
 
 echo "Assembling ${APP}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-cp .build/release/tuner "$APP/Contents/MacOS/tuner"
+cp "$RELEASE_DIR/tuner" "$APP/Contents/MacOS/tuner"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -28,25 +37,48 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>            <string>tuner</string>
-    <key>CFBundleIdentifier</key>            <string>dev.rymndhng.teach-touch.tuner</string>
-    <key>CFBundleName</key>                  <string>Teach Touch Tuner</string>
-    <key>CFBundleDisplayName</key>           <string>Teach Touch Tuner</string>
+    <key>CFBundleIdentifier</key>            <string>dev.rymndhng.teach-touch.app</string>
+    <key>CFBundleName</key>                  <string>Teach Touch</string>
+    <key>CFBundleDisplayName</key>           <string>Teach Touch</string>
     <key>CFBundlePackageType</key>           <string>APPL</string>
     <key>CFBundleShortVersionString</key>    <string>${VERSION}</string>
     <key>CFBundleVersion</key>               <string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key>        <string>13.0</string>
     <key>NSHighResolutionCapable</key>       <true/>
-    <!-- Writes a config file only; it needs no Input Monitoring or
-         Accessibility permission. touchd is the one that needs those. -->
     <key>LSApplicationCategoryType</key>     <string>public.app-category.utilities</string>
+    <!-- Shown in the Input Monitoring prompt. The app reads the trackpad
+         directly over HID; without this grant the device will not open. -->
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Teach Touch reads your ZSA trackpad directly to turn its raw touch reports into cursor movement, clicks and scrolling.</string>
 </dict>
 </plist>
 PLIST
 
-# Ad-hoc signature. Without any signature at all, Gatekeeper is more awkward
-# about a freshly built binary than it needs to be.
-codesign --force --sign - "$APP" 2>/dev/null || \
-    echo "  (codesign unavailable — the app still runs)"
+# Sign with the local identity if it exists, so TCC keeps its grants across
+# rebuilds. Ad-hoc signing names the code hash in the designated requirement,
+# which changes with every build, so every build looks like a different app and
+# has to be granted Accessibility and Input Monitoring again.
+#
+# See scripts/create-signing-identity.sh — it is a one-time setup, and this
+# falls back to ad-hoc if it has not been run.
+IDENTITY="Teach Touch Local"
+KEYCHAIN="$HOME/Library/Keychains/teach-touch-signing.keychain"
+
+if security find-identity -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "$IDENTITY"; then
+    security unlock-keychain -p teach-touch "$KEYCHAIN" 2>/dev/null || true
+    codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" "$APP"
+    echo "Signed with \"$IDENTITY\" — permissions survive rebuilds."
+else
+    codesign --force --sign - "$APP" 2>/dev/null || \
+        echo "  (codesign unavailable — the app still runs)"
+    cat <<'SIGN'
+
+⚠️  Ad-hoc signed, so macOS will treat this build as a new app and ask for
+    Accessibility and Input Monitoring again. To stop that, run once:
+
+      ./scripts/create-signing-identity.sh
+SIGN
+fi
 
 echo
 echo "Built: ${PWD}/${APP}"
@@ -54,5 +86,24 @@ echo
 echo "  open '${APP}'                     launch it now"
 echo "  cp -R '${APP}' /Applications/     to keep it"
 echo
-echo "It writes ~/Library/Application Support/teach-touch/tuning.json."
-echo "Run touchd alongside it and changes apply without restarting."
+cat <<'NOTES'
+The trackpad works for as long as the app is open; quitting it puts the pad
+back in mouse mode.
+
+FIRST RUN — it needs two permissions, in System Settings ▸ Privacy & Security:
+
+  • Input Monitoring   to read the pad     (relaunch the app after granting)
+  • Accessibility      to move the cursor  (takes effect immediately)
+
+TCC is per-binary, so a grant given to your terminal for `swift run` does not
+carry over, and neither does one given to a copy in build/ once you move it to
+/Applications. Grant them to the copy you actually use.
+
+Settings are written to ~/Library/Application Support/teach-touch/tuning.json,
+so a headless `touchd` LaunchAgent picks up the same values. Don't run both at
+once — the app detects a running LaunchAgent and leaves the pad to it.
+
+If the cursor ever stops responding entirely:
+
+  swift run hid-stream --restore
+NOTES

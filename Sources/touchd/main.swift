@@ -1,16 +1,25 @@
 import Foundation
 import HIDCore
+import TouchDriver
 import TouchEvents
 
 // teach-touch daemon — Stages 3 + 4 together.
 //
 // One finger moves the cursor and taps click; two fingers scroll. This is the
-// first build that replaces everything mouse mode used to do, so the trackpad
-// stays usable for the whole time it runs.
+// headless front end: flags in, driver running, Ctrl-C restores mouse mode.
+// The loop itself lives in `TouchDriver`, which the tuning app also runs, so
+// there is one implementation rather than two that drift.
 
 func printUsage() {
     print("""
     touchd — pointer and scrolling for the ZSA trackpad
+
+    The tuning app runs this same driver for as long as its window is open, so
+    for interactive use you usually want the app instead:
+
+      ./scripts/build-app.sh && open 'build/Teach Touch.app'
+
+    This command is for running it headless, as a LaunchAgent.
 
     USAGE
       touchd                        run the driver
@@ -82,62 +91,54 @@ func value(_ flag: String) -> Double? {
 }
 
 // Saved tuning underlies every default; command-line flags still override it,
-// and the `tuner` app rewrites this file live while the daemon runs.
-let liveTuning = args.contains("--no-live") ? nil : Tuning.load()
+// and the tuning app rewrites this file live.
+let live = !args.contains("--no-live")
+let liveTuning = live ? Tuning.load() : nil
 
-let verbose = args.contains("--verbose")
-let dryRun = args.contains("--dry-run")
-let tapEnabled = !args.contains("--no-tap")
+var options = TouchDriver.Options()
+options.verbose = args.contains("--verbose")
+options.dryRun = args.contains("--dry-run")
+options.collectStats = args.contains("--stats")
+options.publishTelemetry = live
+options.surfaceWidthMM = value("--surface")
+
 // Separable from tap-to-click: right-clicking by two-finger tap is the part
 // people most often want off on its own, because it can fire during scrolls.
-let rightTapEnabled = tapEnabled && !args.contains("--no-right-tap")
-// Built here rather than beside the rest of the pipeline so the startup
-// summary can print its real values instead of restating the defaults, which
-// is how the summary came to disagree with the code once already.
-let pointerRecognizer = PointerRecognizer()
-liveTuning?.apply(to: pointerRecognizer)
-if args.contains("--no-tap") || args.contains("--no-right-tap") {
-    pointerRecognizer.twoFingerTapEnabled = rightTapEnabled
+options.tapEnabled = liveTuning?.tapEnabled ?? true
+if args.contains("--no-tap") {
+    options.tapEnabled = false
+    options.tapLocked = true
 }
-if let t = value("--tap-time") { pointerRecognizer.tapMaxDuration = t }
-if let d = value("--tap-travel") { pointerRecognizer.tapMaxTravel = d }
-if let t = value("--two-tap-time") { pointerRecognizer.twoFingerTapMaxDuration = t }
-if let d = value("--two-tap-travel") { pointerRecognizer.twoFingerTapMaxTravel = d }
-if let t = value("--double-tap-time") { pointerRecognizer.doubleTapInterval = t }
-if let d = value("--double-tap-dist") { pointerRecognizer.doubleTapMaxDistance = d }
+let rightTapEnabled = options.tapEnabled && !args.contains("--no-right-tap")
+if args.contains("--no-right-tap") { options.tapLocked = true }
 
-let showStats = args.contains("--stats")
+liveTuning?.apply(to: &options.scroll)
+if let g = value("--scroll-gain") { options.scroll.gain = g }
+if let t = value("--flick") { options.scroll.momentumThreshold = t }
+if let d = value("--decay") { options.scroll.momentumDecayTime = d }
+if let f = value("--friction") { options.scroll.friction = f }   // after momentumHz
+if args.contains("--reverse") { options.scroll.naturalDirection = false }
+if args.contains("--no-momentum") { options.scroll.momentumEnabled = false }
 
-var scrollConfig = ScrollSynthesizer.Configuration()
-liveTuning?.apply(to: &scrollConfig)
-if let g = value("--scroll-gain") { scrollConfig.gain = g }
-if let t = value("--flick") { scrollConfig.momentumThreshold = t }
-if let d = value("--decay") { scrollConfig.momentumDecayTime = d }
-if let f = value("--friction") { scrollConfig.friction = f }   // after momentumHz
-if args.contains("--reverse") { scrollConfig.naturalDirection = false }
-if args.contains("--no-momentum") { scrollConfig.momentumEnabled = false }
-
-var pointerConfig = PointerSynthesizer.Configuration()
-liveTuning?.apply(to: &pointerConfig)
-if let g = value("--pointer-gain") { pointerConfig.gain = g }
-if let a = value("--accel-max") { pointerConfig.maxAcceleration = a }
-if let a = value("--accel-min") { pointerConfig.minAcceleration = a }
-if let c = value("--accel-curve") { pointerConfig.accelerationCurve = c }
-if let r = value("--accel-pivot") { pointerConfig.accelerationPivot = r }
-if args.contains("--no-accel") { pointerConfig.accelerationEnabled = false }
-if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
-if let s = value("--arm-speed") { pointerConfig.stopGate.armSpeed = s }
-if args.contains("--no-stop-gate") { pointerConfig.stopGate.enabled = false }
+liveTuning?.apply(to: &options.pointer)
+if let g = value("--pointer-gain") { options.pointer.gain = g }
+if let a = value("--accel-max") { options.pointer.maxAcceleration = a }
+if let a = value("--accel-min") { options.pointer.minAcceleration = a }
+if let c = value("--accel-curve") { options.pointer.accelerationCurve = c }
+if let r = value("--accel-pivot") { options.pointer.accelerationPivot = r }
+if args.contains("--no-accel") { options.pointer.accelerationEnabled = false }
+if let s = value("--stop-speed") { options.pointer.stopGate.stopSpeed = s }
+if let s = value("--arm-speed") { options.pointer.stopGate.armSpeed = s }
+if args.contains("--no-stop-gate") { options.pointer.stopGate.enabled = false }
 
 // Strip the pipeline back to raw delta x gain. Every transform below was
 // added to fix a specific symptom, and stacked they are hard to reason about;
 // this is the baseline to build back up from, one stage at a time.
 let minimal = args.contains("--minimal")
 if minimal {
-    pointerConfig.accelerationEnabled = false
-    pointerConfig.stopGate.enabled = false
+    options.pointer.accelerationEnabled = false
+    options.pointer.stopGate.enabled = false
 }
-
 
 // One switch for "make it stop when I stop".
 //
@@ -149,141 +150,100 @@ if minimal {
 // the only setting that felt right it advanced motion by a quarter of a frame,
 // 1.6ms, while still amplifying noise. The gate does all of this work.
 if args.contains("--hard-stop") {
-    pointerConfig.stopGate.makeAggressive()
-    if let s = value("--stop-speed") { pointerConfig.stopGate.stopSpeed = s }
-    if let s = value("--arm-speed") { pointerConfig.stopGate.armSpeed = s }
+    options.pointer.stopGate.makeAggressive()
+    if let s = value("--stop-speed") { options.pointer.stopGate.stopSpeed = s }
+    if let s = value("--arm-speed") { options.pointer.stopGate.armSpeed = s }
 }
 
-// MARK: - Permissions
+let driver = TouchDriver(options: options)
 
-if !dryRun && !ScrollSynthesizer.hasAccessibilityPermission() {
-    print("""
-    Accessibility permission is required to post events.
+// Tap limits live on the recognizer the driver owns. Saved tuning first, then
+// flags, matching the precedence everything else uses.
+let pointerRecognizer = driver.pointerRecognizer
+liveTuning?.apply(to: pointerRecognizer)
+if args.contains("--no-tap") || args.contains("--no-right-tap") {
+    pointerRecognizer.twoFingerTapEnabled = rightTapEnabled
+}
+if let t = value("--tap-time") { pointerRecognizer.tapMaxDuration = t }
+if let d = value("--tap-travel") { pointerRecognizer.tapMaxTravel = d }
+if let t = value("--two-tap-time") { pointerRecognizer.twoFingerTapMaxDuration = t }
+if let d = value("--two-tap-travel") { pointerRecognizer.twoFingerTapMaxTravel = d }
+if let t = value("--double-tap-time") { pointerRecognizer.doubleTapInterval = t }
+if let d = value("--double-tap-dist") { pointerRecognizer.doubleTapMaxDistance = d }
 
-    Without it CGEventPost silently does nothing. Grant it to your terminal:
-      System Settings ▸ Privacy & Security ▸ Accessibility
+driver.onLog = { print("  \($0)") }
 
-    Requesting now — approve, then re-run.
-    """)
-    _ = ScrollSynthesizer.hasAccessibilityPermission(prompt: true)
-    exit(1)
+// MARK: - Startup summary
+
+driver.onDeviceReady = { session in
+    print("Device        \(session.device.info.summary)")
+    if let size = session.layout.surfaceSize {
+        print(String(format: "Surface       %.1f × %.1f mm, %d contacts",
+                     size.x, size.y, session.layout.maxContacts))
+    }
+    // Spell out exactly what sits between the hardware and the cursor. Stacked
+    // transforms are the main reason the feel became hard to reason about.
+    let pointerConfig = driver.pointerConfiguration
+    func stage(_ name: String, _ on: Bool, _ detail: String) {
+        print("              \(on ? "→" : "·") \(name.padding(toLength: 20, withPad: " ", startingAt: 0))"
+            + (on ? detail : "off"))
+    }
+    print("Pipeline      raw report from device")
+    stage("acceleration", pointerConfig.accelerationEnabled,
+          String(format: "×%.2f–%.2f, curve %.2f, ref %.0f mm/s",
+                 pointerConfig.minAcceleration, pointerConfig.maxAcceleration,
+                 pointerConfig.accelerationCurve, pointerConfig.accelerationPivot))
+    stage("stop gate", pointerConfig.stopGate.enabled,
+          String(format: "cut below %.0f mm/s, armed above %.0f",
+                 pointerConfig.stopGate.stopSpeed, pointerConfig.stopGate.armSpeed))
+    print(String(format: "              → %@%.0f px/mm",
+                 "gain                ", pointerConfig.gain))
+    print("              → CGEventPost")
+    if minimal && !pointerConfig.stopGate.enabled && !pointerConfig.accelerationEnabled {
+        print("              (--minimal: raw delta × gain only)")
+    }
+    print()
+    let scrollConfig = driver.scrollConfiguration
+    print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
+                 scrollConfig.gain,
+                 scrollConfig.naturalDirection ? "natural" : "reversed",
+                 scrollConfig.momentumDecayTime))
+    // Times in seconds, matching the unit the flags take. Printing ms here once
+    // invited passing 500 back in, which parses as a 500-second window.
+    if driver.options.tapEnabled {
+        print(String(format: "Tap to click  left, max %.2fs and %.1f mm",
+                     pointerRecognizer.tapMaxDuration, pointerRecognizer.tapMaxTravel))
+        print(String(format: "Two-finger    %@",
+                     pointerRecognizer.twoFingerTapEnabled
+                         ? String(format: "right click, max %.2fs and %.1f mm",
+                                  pointerRecognizer.twoFingerTapMaxDuration,
+                                  pointerRecognizer.twoFingerTapMaxTravel)
+                         : "right click off"))
+        print(String(format: "Double click  within %.2fs of the last tap lifting, %.1f mm",
+                     pointerRecognizer.doubleTapInterval,
+                     pointerRecognizer.doubleTapMaxDistance))
+    } else {
+        print("Tap to click  off")
+    }
+    if driver.options.dryRun { print("Dry run       recognising only, posting nothing") }
+    print()
+    print("Switching to multitouch (Input Mode = \(ZSA.inputModeMultitouch))…")
 }
 
-// MARK: - Device
-
-let session: TouchSession
-do {
-    session = try TouchSession.discover()
-} catch {
-    print("\(error)"); exit(1)
+driver.onReady = {
+    print("\nReady. One finger moves, tap clicks, two fingers scroll.")
+    print("Ctrl-C to stop and restore mouse mode.\n")
 }
 
-// MARK: - Surface calibration
-//
-// The descriptor's claimed surface is corrected at discovery — see
-// ZSA.measuredSurfaceWidthMM. Every threshold below is therefore denominated
-// in real millimetres, and this flag only exists for a unit whose sensor is a
-// different size. Nothing else needs rescaling: the defaults are already in
-// true millimetres, so correcting the scale is all it takes.
-if let trueWidth = value("--surface"),
-   let declared = session.layout.declaredSurfaceSize, declared.x > 0 {
-    session.layout.positionScale = trueWidth / declared.x
-    print(String(format: "Calibration   overriding %.0f mm with %.0f mm",
-                 ZSA.measuredSurfaceWidthMM, trueWidth))
+driver.onForeignReport = { reportID in
+    print("⚠️  report \(reportID) — device fell back to mouse mode")
 }
 
-print("Device        \(session.device.info.summary)")
-if let size = session.layout.surfaceSize {
-    print(String(format: "Surface       %.1f × %.1f mm, %d contacts",
-                 size.x, size.y, session.layout.maxContacts))
-}
-// Spell out exactly what sits between the hardware and the cursor. Stacked
-// transforms are the main reason the feel became hard to reason about.
-func stage(_ name: String, _ on: Bool, _ detail: String) {
-    print("              \(on ? "→" : "·") \(name.padding(toLength: 20, withPad: " ", startingAt: 0))"
-        + (on ? detail : "off"))
-}
-print("Pipeline      raw report from device")
-stage("acceleration", pointerConfig.accelerationEnabled,
-      String(format: "×%.2f–%.2f, curve %.2f, ref %.0f mm/s",
-             pointerConfig.minAcceleration, pointerConfig.maxAcceleration,
-             pointerConfig.accelerationCurve, pointerConfig.accelerationPivot))
-stage("stop gate", pointerConfig.stopGate.enabled,
-      String(format: "cut below %.0f mm/s, armed above %.0f",
-             pointerConfig.stopGate.stopSpeed, pointerConfig.stopGate.armSpeed))
-print(String(format: "              → %@%.0f px/mm",
-             "gain                ", pointerConfig.gain))
-print("              → CGEventPost")
-if minimal && !pointerConfig.stopGate.enabled && !pointerConfig.accelerationEnabled {
-    print("              (--minimal: raw delta × gain only)")
-}
-print()
-print(String(format: "Scroll        %.0f px/mm, %@, decay %.2fs",
-             scrollConfig.gain,
-             scrollConfig.naturalDirection ? "natural" : "reversed",
-             scrollConfig.momentumDecayTime))
-// Times in seconds, matching the unit the flags take. Printing ms here once
-// invited passing 500 back in, which parses as a 500-second window.
-if tapEnabled {
-    print(String(format: "Tap to click  left, max %.2fs and %.1f mm",
-                 pointerRecognizer.tapMaxDuration, pointerRecognizer.tapMaxTravel))
-    print(String(format: "Two-finger    %@",
-                 rightTapEnabled
-                     ? String(format: "right click, max %.2fs and %.1f mm",
-                              pointerRecognizer.twoFingerTapMaxDuration,
-                              pointerRecognizer.twoFingerTapMaxTravel)
-                     : "right click off"))
-    print(String(format: "Double click  within %.2fs of the last tap lifting, %.1f mm",
-                 pointerRecognizer.doubleTapInterval,
-                 pointerRecognizer.doubleTapMaxDistance))
-} else {
-    print("Tap to click  off")
-}
-if dryRun { print("Dry run       recognising only, posting nothing") }
-print()
+// MARK: - Shutdown
 
-do {
-    try session.open()
-} catch {
-    print("""
-    \(error)
-
-    If this is a permissions failure, grant Input Monitoring to your terminal:
-      System Settings ▸ Privacy & Security ▸ Input Monitoring
-    """)
-    exit(1)
-}
-
-func log(_ message: String) { print("  \(message)") }
-
-print("Switching to multitouch (Input Mode = \(ZSA.inputModeMultitouch))…")
-do {
-    try session.enableMultitouch(log: log)
-} catch {
-    print("  \(error)"); session.stop(); exit(1)
-}
-
-// MARK: - Pipeline
-
-let tracker = ContactTracker(layout: session.layout)
-let scrollRecognizer = ScrollRecognizer()
-// Publishes what the pointer is doing so the tuner can mark it on the curve.
-// Optional: if it cannot be created the driver carries on regardless.
-let telemetry = args.contains("--no-live") ? nil : TelemetryChannel(writable: true)
-
-let scrollSynthesizer = ScrollSynthesizer(configuration: scrollConfig)
-let pointerSynthesizer = PointerSynthesizer(configuration: pointerConfig)
-
-var restoring = false
 func restoreAndExit(_ code: Int32) -> Never {
-    guard !restoring else { exit(code) }
-    restoring = true
-    scrollSynthesizer.cancelMomentum()
-    // Never leave a button stuck down for the rest of the session.
-    if !dryRun { pointerSynthesizer.releaseAll() }
     print("\nRestoring mouse mode…")
-    session.restoreMouseMode(log: log)
-    session.stop()
+    driver.stop()
     exit(code)
 }
 
@@ -298,211 +258,73 @@ let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .mai
 sigtermSource.setEventHandler { restoreAndExit(0) }
 sigtermSource.resume()
 
-var lastWall = Date()
-var previousContactCount = 0
-var taps = 0
-var scrolls = 0
-
-/// Measurements for --stats. Report rate caps how smooth anything can be, and
-/// stationary jitter is what the 1€ filter has to suppress.
-struct FeelStats {
-    var intervals: [Double] = []
-    /// Time spent inside the frame handler. If this approaches the report
-    /// interval, processing falls behind during movement and drains after —
-    /// felt as lag that outlasts the finger.
-    var handlerTimes: [Double] = []
-    /// Raw positions captured while a single finger was essentially still.
-    var stillRaw: [Point] = []
-    var stillFiltered: [Point] = []
-
-    mutating func record(interval: Double) {
-        guard interval > 0, interval < 1 else { return }
-        intervals.append(interval)
-        if intervals.count > 4000 { intervals.removeFirst() }
+atexit {
+    if args.contains("--stats") { print(); driver.stats.report().forEach { print($0) } }
+    if driver.tapCount > 0 || driver.scrollCount > 0 {
+        print("\(driver.tapCount) taps, \(driver.scrollCount) scrolls")
     }
-
-    mutating func record(handler seconds: Double) {
-        handlerTimes.append(seconds)
-        if handlerTimes.count > 4000 { handlerTimes.removeFirst() }
-    }
-
-    static func spread(_ points: [Point]) -> Double {
-        guard points.count > 2 else { return 0 }
-        let n = Double(points.count)
-        let mx = points.reduce(0.0) { $0 + $1.x } / n
-        let my = points.reduce(0.0) { $0 + $1.y } / n
-        let variance = points.reduce(0.0) {
-            $0 + ($1.x - mx) * ($1.x - mx) + ($1.y - my) * ($1.y - my)
-        } / n
-        return variance.squareRoot()
-    }
-
-    func report() {
-        guard !intervals.isEmpty else { print("\nNo reports measured."); return }
-        let sorted = intervals.sorted()
-        let mean = intervals.reduce(0, +) / Double(intervals.count)
-        let median = sorted[sorted.count / 2]
-        let p99 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.99))]
-
-        print("\n── feel measurements ───────────────────────────────")
-        print(String(format: "  report rate    %.0f Hz mean, %.0f Hz median",
-                     1 / mean, 1 / median))
-        print(String(format: "  worst gap      %.1f ms (p99)  — spikes read as stutter",
-                     p99 * 1000))
-        if !handlerTimes.isEmpty {
-            let h = handlerTimes.sorted()
-            let hmean = handlerTimes.reduce(0, +) / Double(handlerTimes.count)
-            let hp99 = h[min(h.count - 1, Int(Double(h.count) * 0.99))]
-            let budget = median * 1000
-            print(String(format: "  handler time   %.2f ms mean, %.2f ms p99  (budget %.1f ms)",
-                         hmean * 1000, hp99 * 1000, budget))
-            if hp99 * 1000 > budget * 0.5 {
-                print("                 ⚠️  over half the frame budget — processing")
-                print("                     will fall behind during fast movement")
-            }
-        }
-        print(String(format: "  jitter raw     %.4f mm", FeelStats.spread(stillRaw)))
-        print(String(format: "  jitter filtered %.4f mm  (%d samples while still)",
-                     FeelStats.spread(stillFiltered), stillFiltered.count))
-        if !stillRaw.isEmpty && !stillFiltered.isEmpty {
-            let before = FeelStats.spread(stillRaw)
-            let after = FeelStats.spread(stillFiltered)
-            if before > 0 {
-                print(String(format: "  noise removed  %.0f%%", (1 - after / before) * 100))
-            }
-        }
-    }
-}
-var stats = FeelStats()
-
-session.onFraming = { _, _, _, _ in
-    print("\nReady. One finger moves, tap clicks, two fingers scroll.")
-    print("Ctrl-C to stop and restore mouse mode.\n")
-}
-
-session.onForeignReport = { reportID, _ in
-    print("⚠️  report \(reportID) — device fell back to mouse mode")
-}
-
-session.onFrame = { frame, _ in
-    let handlerStart = showStats ? DispatchTime.now() : nil
-    let now = Date()
-    let wall = now.timeIntervalSince(lastWall)
-    lastWall = now
-
-    tracker.update(frame, wallClockDelta: wall)
-    let dt = tracker.lastDelta
-    let tracks = tracker.active
-
-    if showStats {
-        stats.record(interval: dt)
-        // Sample jitter only when one finger is down and barely moving, which
-        // is the condition the filter is meant to clean up.
-        if let raw = frame.contacts.first, frame.contacts.count == 1,
-           let filtered = tracks.first, filtered.velocity.magnitude < 2.0 {
-            stats.stillRaw.append(raw.position)
-            stats.stillFiltered.append(filtered.position)
-            if stats.stillRaw.count > 2000 {
-                stats.stillRaw.removeFirst()
-                stats.stillFiltered.removeFirst()
-            }
-        }
-    }
-
-    // A genuinely new touch stops coasting. Keyed to the 0 → N transition:
-    // two fingers never lift on the same frame, so "any contact present" would
-    // let the straggler cancel the momentum it just started.
-    if previousContactCount == 0 && !frame.contacts.isEmpty {
-        scrollSynthesizer.cancelMomentum()
-    }
-    // With no fingers down, drop our cursor belief so the next touch picks up
-    // wherever the pointer actually is — it may have been moved by something
-    // else in the meantime.
-    if frame.contacts.isEmpty && previousContactCount != 0 {
-        pointerSynthesizer.resync()
-    }
-    previousContactCount = frame.contacts.count
-
-    // Scroll first — it owns two-finger input, and the pointer recognizer
-    // suppresses itself for any sequence that ever had two fingers down.
-    if let update = scrollRecognizer.update(tracks: tracks, dt: dt) {
-        if !dryRun { scrollSynthesizer.handle(update) }
-        if verbose, case .began = update.phase {
-            scrolls += 1
-            print("scroll began")
-        }
-    }
-
-    let previousRejection = pointerRecognizer.lastTapRejection
-    let pointerEvents = pointerRecognizer.update(tracks: tracks, buttons: frame.buttons, dt: dt)
-    // A tap that does nothing looks identical to one that was never seen, so
-    // say why. Only on change, or a resting hand would spam the log.
-    if verbose, let reason = pointerRecognizer.lastTapRejection, reason != previousRejection {
-        print("no tap: \(reason)")
-    }
-
-    // Publish before filtering, so the panel shows the speed the curve sees
-    // even for motion the stop gate is about to drop.
-    if let telemetry {
-        var speed = 0.0
-        for case .move(let millimetres) in pointerEvents where dt > 0 {
-            speed = millimetres.magnitude / dt
-        }
-        telemetry.publish(speed: speed,
-                          pixelsPerMillimetre: pointerSynthesizer.configuration
-                              .pixelsPerMillimetre(atSpeed: speed),
-                          contacts: tracks.count)
-    }
-
-    for event in pointerEvents {
-        // Filter before synthesising, not after — otherwise --no-tap only
-        // silences the log line while still clicking.
-        if case .tap = event, !tapEnabled { continue }
-
-        if !dryRun { pointerSynthesizer.handle(event, dt: dt) }
-
-        switch event {
-        case .tap(let button, let count):
-            taps += 1
-            if verbose { print("tap \(button) ×\(count)") }
-        case .buttonChanged(let button, let down):
-            if verbose { print("button \(button) \(down ? "down" : "up")") }
-        case .move:
-            break
-        }
-    }
-
-    if let handlerStart {
-        let ns = DispatchTime.now().uptimeNanoseconds - handlerStart.uptimeNanoseconds
-        stats.record(handler: Double(ns) / 1_000_000_000)
+    if driver.idChurnDetected {
+        print("⚠️  hardware contact IDs were unstable during this run")
     }
 }
 
-// Live tuning: the `tuner` app rewrites the file, and the change lands without
+// MARK: - Run
+
+// The tuning app runs a driver too, and two of them both flipping Input Mode
+// and both posting events is the one failure mode that costs you the cursor.
+if TouchDriver.isAnotherDriverRunning() {
+    print("""
+    Another teach-touch driver is already running — most likely the tuning app,
+    or the LaunchAgent copy. Quit that one first:
+
+      launchctl bootout gui/$UID/dev.rymndhng.teach-touch
+    """)
+    exit(1)
+}
+
+do {
+    try driver.start()
+} catch DriverError.accessibilityDenied {
+    print("""
+    Accessibility permission is required to post events.
+
+    Without it CGEventPost silently does nothing. Grant it to your terminal:
+      System Settings ▸ Privacy & Security ▸ Accessibility
+
+    Requesting now — approve, then re-run.
+    """)
+    _ = ScrollSynthesizer.hasAccessibilityPermission(prompt: true)
+    exit(1)
+} catch let error as DriverError {
+    print("\(error)")
+    exit(1)
+} catch let error as SessionError {
+    print("""
+    \(error)
+
+    If this is a permissions failure, grant Input Monitoring to your terminal:
+      System Settings ▸ Privacy & Security ▸ Input Monitoring
+    """)
+    exit(1)
+} catch {
+    print("\(error)")
+    driver.stop()
+    exit(1)
+}
+
+// Live tuning: the tuning app rewrites the file, and the change lands without
 // restarting. Handlers run on the main queue, which is where the HID callback
 // runs too, so no locking is needed around the synthesiser configs.
 var watcher: TuningWatcher?
-if !args.contains("--no-live") {
+if live {
     let w = TuningWatcher { updated in
-        updated.apply(to: &pointerSynthesizer.configuration)
-        updated.apply(to: &scrollSynthesizer.configuration)
-        updated.apply(to: pointerRecognizer)
+        driver.apply(updated)
         print(String(format: "  tuning reloaded — gain %.0f px/mm, flat to %.0f mm/s",
                      updated.pointerGain, updated.accelerationKnee))
     }
     w.start()
     watcher = w
     _ = watcher
-}
-
-session.start()
-
-atexit {
-    if showStats { stats.report() }
-    if taps > 0 || scrolls > 0 { print("\(taps) taps, \(scrolls) scrolls") }
-    if tracker.idChurnDetected {
-        print("⚠️  hardware contact IDs were unstable during this run")
-    }
 }
 
 CFRunLoopRun()

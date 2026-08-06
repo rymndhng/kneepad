@@ -318,7 +318,15 @@ Note the 2-contact ceiling from the Risks table: three-finger swipes are not
 available from this hardware regardless.
 
 ### Stage 6 — Packaging ✅ (written, not yet installed)
-`scripts/install-agent.sh` / `scripts/uninstall-agent.sh`.
+
+Two ways to run it, and only one at a time.
+
+**The app** — `scripts/build-app.sh` builds `build/Teach Touch.app`, which
+drives the pad while it is open. This is the normal way to use the project;
+see "The app" below.
+
+**The LaunchAgent** — `scripts/install-agent.sh` /
+`scripts/uninstall-agent.sh`, for the pad working with nothing open.
 
 Builds release binaries, installs to `~/.local/bin`, writes a LaunchAgent
 plist to `~/Library/LaunchAgents/dev.rymndhng.teach-touch.plist`, and
@@ -427,24 +435,164 @@ thing it targets is large enough to see in the output.
 
 ---
 
-## Tuning app
+## The app
 
-`swift run tuner` opens a panel of sliders beside a live plot of the
-acceleration curve. It writes
-`~/Library/Application Support/teach-touch/tuning.json`; `touchd` watches that
-file and applies changes **without restarting**, so the loop is: move a slider,
-move your finger, feel the difference.
+**Teach Touch.app is the driver.** It runs one for as long as it is open, and
+restores mouse mode when it quits. The panel of sliders beside the live plot
+tunes that in-process driver directly.
 
 ```
-./scripts/build-app.sh          # builds build/Teach Touch Tuner.app
-open 'build/Teach Touch Tuner.app'
-./.build/debug/touchd           # in a terminal, alongside it
+./scripts/build-app.sh          # builds build/Teach Touch.app
+open 'build/Teach Touch.app'
 ```
 
-`swift run tuner` also works, but a bare SwiftPM executable is a faceless
-process to macOS — no Dock icon, no menu bar, and it cannot be focused
-properly. The bundle is what makes it a real app; copy it to `/Applications`
-to keep it.
+The driver loop lives in `Sources/TouchDriver`, which both front ends run:
+the app, and `touchd` for a headless LaunchAgent. It was inside `touchd`'s
+`main.swift` until the two were merged.
+
+**Why they merged.** Packaged apart, every session began by remembering to
+start a second thing in a terminal, and the app could only reach the driver
+through a file on disk. Worse, the split doubled the permissions problem: TCC
+is per-binary, so the panel and the driver held separate grants and any
+"nothing is happening" had to be diagnosed against both.
+
+Consequences of embedding, each of which needed a fix:
+
+- **Two drivers must never run at once.** Both would flip Input Mode and both
+  would post events, and the failure mode is losing the cursor. The app checks
+  `TouchDriver.isAnotherDriverRunning()` before starting and leaves the pad to
+  a running LaunchAgent, tuning it through the file as before; `touchd` refuses
+  to start when the app has it. Detection is by telemetry freshness, so it
+  catches a driver started any way at all — the cost is that a driver run with
+  telemetry off is invisible to it.
+- **HID reports must be scheduled in the run loop's *common* modes.** AppKit
+  switches to event-tracking mode for the whole of a slider drag, and a source
+  registered only in the default mode goes quiet for that entire time — the
+  trackpad would die while you dragged the slider tuning it. Same for the
+  telemetry timer that drives the plot.
+- **Quitting has to restore mouse mode.** `applicationWillTerminate` calls
+  `stopDriver()`. A hard kill still can't, which is what `hid-stream --restore`
+  is for.
+- **Failures are recoverable, not fatal.** No device, no Accessibility, another
+  driver running — each shows in the footer and retries every 3 s, so plugging
+  the board in or granting a permission works without relaunching.
+- **The panel has to stop drawing when nobody is looking.** Measured below.
+
+### Code signing — why the permissions kept being forgotten
+
+TCC keys its Accessibility and Input Monitoring grants to the app's **code
+signature**, through codesign's designated requirement. Ad-hoc signing has no
+certificate to name, so the requirement is the code hash itself:
+
+```
+designated => cdhash H"44cfd00a8a95…"      ← different after every build
+```
+
+Every rebuild was therefore a different app, and both permissions had to be
+granted again. Signing with a certificate names the certificate instead, which
+does not change when the code does:
+
+```
+designated => identifier "dev.rymndhng.teach-touch.app"
+              and certificate leaf = H"b290b703de78…"
+```
+
+`scripts/create-signing-identity.sh` makes a self-signed certificate in its own
+keychain, once; `build-app.sh` uses it when present and falls back to ad-hoc
+with a warning. Two findings worth keeping:
+
+- **codesign does not require the certificate to be trusted.** It signs
+  happily with a certificate reporting `CSSMERR_TP_NOT_TRUSTED`, so there is no
+  keychain trust prompt and nothing else on the system is asked to believe it.
+  `security find-identity -v` hides it, though — `-v` means valid, so drop it
+  or the identity looks absent.
+- **OpenSSL 3 cannot hand a PKCS#12 to the macOS keychain by default.** It uses
+  AES-256-CBC with a SHA-256 MAC; `security import` reports that as a bad
+  password, which is a memorable way to lose an afternoon. Export with
+  `-keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1`.
+
+### App Nap — why scrolling lagged in the app but not in `touchd`
+
+A GUI app whose window is behind something else is exactly what App Nap
+targets: macOS throttles the process and coalesces its timers. A command-line
+`touchd` is never napped, so this is a cost the driver only started paying
+once it moved inside the app.
+
+Scrolling shows it first. The pointer only needs frames to arrive on time;
+scrolling needs that **and** a 120 Hz momentum timer, and a coalesced timer is
+felt directly as lag.
+
+`TouchDriver` now holds a `beginActivity` assertion for as long as it is
+driving: `userInitiatedAllowingIdleSystemSleep` (the trackpad working is not a
+reason to keep the machine awake) plus `latencyCritical` (which is what asks
+for the timer precision). **Confirmed on hardware: the lag is gone.**
+
+The footer reports the rate the driver is actually seeing, because "scrolling
+lags" has two causes that cannot be told apart by hand — frames not arriving,
+or us not keeping up with them. `TouchDriver.health()` measures both, always,
+for two clock reads per frame; the panel turns the line orange and names which
+one it is.
+
+**Two ways that measurement was wrong first**, both worth remembering:
+
+- It timed frames by `ContactTracker.lastDelta`, which comes from the device's
+  own **Scan Time**. That is the right clock for velocity — host arrival times
+  are jittery because of USB batching, which is why the tracker uses it — and
+  exactly the wrong one for "did this frame reach us late", a question about
+  host arrival that device time cannot answer by construction.
+- It counted the gap between *gestures*. The pad reports nothing while
+  untouched, so the first frame of a touch carries however long you left it
+  alone — reported, with a straight face, as a 160 ms late frame. Intervals are
+  now recorded only within a touch.
+
+The panel also holds the worst reading for 30 s, because the lag being chased
+happens while the window is behind something else, and a value that expires in
+1.5 s is gone before it can be read.
+
+### Drawing costs, measured
+
+The plot was costing ~24% CPU whenever the driver was publishing a live
+contact — including with the window buried behind something else, which is
+most of the time now that the app is always open.
+
+Three fixes, in the order they matter:
+
+- **Suspend the poll when the window is not visible** — minimised, hidden, or
+  fully covered — via `windowDidChangeOcclusionState`. The driver keeps
+  running; only the display work stops. **24% → 0.8%.**
+- **Cache the indicator colour.** `controlAccentColor` is a dynamic colour, and
+  resolving it goes through the appearance into CoreUI's theme store. It was
+  being resolved on every telemetry tick and inside every draw. `sample`
+  showed it plainly. Invalidated on `viewDidChangeEffectiveAppearance` and
+  `systemColorsDidChange`. **Visible with the plot animating: 24% → 11%.**
+- **Never assign a value that has not changed.** `liveSpeed` redraws the whole
+  plot in `didSet`, and the readout's `stringValue` invalidates its field even
+  when the text is identical, so a resting hand repainted the panel 60 times a
+  second to show the same nothing. **Idle now draws zero frames, ~1% CPU.**
+
+Method, for next time: `ps -o time=` sampled either side of a sleep is the
+ground truth — `top`'s first reading is garbage and `sample` under-attributed
+this badly, showing an apparently idle main thread for a process burning 20%.
+`sample` was still what identified *which* call was hot. A one-line draw
+counter written to a file settled what `sample` could not: whether the view
+was being repainted at all.
+
+The plot can be driven without hardware by writing samples into
+`telemetry.bin` — 32 bytes of little-endian doubles, speed / px-per-mm /
+`CLOCK_UPTIME_RAW` seconds / contacts — which is how the numbers above were
+taken.
+
+Settings still go to `~/Library/Application Support/teach-touch/tuning.json`,
+so a headless `touchd` picks up the same values through its file watcher. In
+the app they are applied in process, which is why the sliders now change the
+feel **while you drag them** — the reason the file write waits for the release
+is that a continuous slider floods a file watcher, and there is no watcher in
+the loop any more.
+
+A bare SwiftPM executable is a faceless process to macOS — no Dock icon, no
+menu bar, and it cannot be focused properly. The bundle is what makes it a real
+app, and TCC will not hold a grant for a loose binary in a build directory
+anyway. Copy it to `/Applications` to keep it.
 
 While `touchd` runs, the plot marks **where your finger is on the curve right
 now** — a dot at the current speed, with a fading trail of the last ~1.5 s. That

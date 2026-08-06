@@ -156,12 +156,21 @@ public final class HIDDevice {
             context)
     }
 
-    public func schedule(on runLoop: CFRunLoop = CFRunLoopGetCurrent()) {
-        IOHIDDeviceScheduleWithRunLoop(ref, runLoop, CFRunLoopMode.defaultMode.rawValue)
+    /// Common modes, not the default mode.
+    ///
+    /// This matters as soon as the driver runs inside an app: AppKit switches
+    /// the run loop into event-tracking mode for the whole of a menu or a
+    /// slider drag, and a source registered only in the default mode stops
+    /// firing for that entire time — the trackpad goes dead while you drag the
+    /// slider that is tuning it. Common modes covers both.
+    public func schedule(on runLoop: CFRunLoop = CFRunLoopGetCurrent(),
+                         mode: CFRunLoopMode = .commonModes) {
+        IOHIDDeviceScheduleWithRunLoop(ref, runLoop, mode.rawValue)
     }
 
-    public func unschedule(from runLoop: CFRunLoop = CFRunLoopGetCurrent()) {
-        IOHIDDeviceUnscheduleFromRunLoop(ref, runLoop, CFRunLoopMode.defaultMode.rawValue)
+    public func unschedule(from runLoop: CFRunLoop = CFRunLoopGetCurrent(),
+                           mode: CFRunLoopMode = .commonModes) {
+        IOHIDDeviceUnscheduleFromRunLoop(ref, runLoop, mode.rawValue)
     }
 
     deinit {
