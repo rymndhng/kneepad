@@ -1,5 +1,7 @@
 import Foundation
+import CoreGraphics
 import HIDCore
+import TouchEvents
 
 // The scroll recognizer is a state machine over tracked contacts. These tests
 // drive it with synthetic frames so the phase transitions, activation
@@ -232,6 +234,62 @@ func runScrollRecognizerTests() {
             let update = try require(step(tracker, recognizer,
                                           [contact(0, 10, 16), contact(1, 30, 16)], at: 4000))
             check(update.phase == .began, "a fresh gesture must begin cleanly")
+        }
+    }
+}
+
+// The CGEvent field encoding. Invisible from inside the process that posts it,
+// and the two delta fields are in different units, so getting one wrong looks
+// like perfectly good scrolling in every app that happens to read the other.
+func runScrollEventTests() {
+    TestRunner.suite("Scroll event encoding") {
+
+        TestRunner.test("pixel and line deltas are in their own units") {
+            let event = try require(ScrollSynthesizer.makeEvent(
+                pixels: Point(x: 0, y: 28), lines: Point(x: 0, y: 2.84),
+                phase: .changed, momentum: .none))
+            expectClose(Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1)),
+                        28, 0.001, "PointDelta is pixels — NSEvent.scrollingDeltaY")
+            expectClose(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1),
+                        2.84, 0.001, "FixedPtDelta is lines — NSEvent.deltaY")
+        }
+
+        // The ratio CoreGraphics uses itself, so it is worth pinning: build a
+        // pixel-unit event and read back what it chose.
+        TestRunner.test("the line ratio matches what CoreGraphics picks") {
+            let reference = try require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                                wheelCount: 2, wheel1: 100, wheel2: 0, wheel3: 0))
+            expectClose(reference.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1),
+                        100 / ScrollSynthesizer.pixelsPerLine, 0.001,
+                        "CoreGraphics converts pixels to lines at our ratio")
+        }
+
+        TestRunner.test("horizontal scrolling uses axis 2") {
+            let event = try require(ScrollSynthesizer.makeEvent(
+                pixels: Point(x: -20, y: 0), lines: Point(x: -2, y: 0),
+                phase: .changed, momentum: .none))
+            expectClose(Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2)),
+                        -20, 0.001, "pixels on axis 2")
+            expectClose(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2),
+                        -2, 0.001, "lines on axis 2")
+        }
+
+        TestRunner.test("a sub-pixel delta still carries a fractional line") {
+            let event = try require(ScrollSynthesizer.makeEvent(
+                pixels: Point(x: 0, y: 0), lines: Point(x: 0, y: 0.05),
+                phase: .changed, momentum: .none))
+            check(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == 0,
+                  "no whole pixel yet")
+            check(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1) > 0,
+                  "but the fraction survives for a line-based reader")
+        }
+
+        TestRunner.test("continuous is set, or apps treat it as a notched wheel") {
+            let event = try require(ScrollSynthesizer.makeEvent(
+                pixels: Point(x: 0, y: 10), lines: Point(x: 0, y: 1),
+                phase: .changed, momentum: .none))
+            check(event.getIntegerValueField(.scrollWheelEventIsContinuous) == 1,
+                  "continuous flag must be set")
         }
     }
 }

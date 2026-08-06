@@ -275,7 +275,33 @@ Design notes:
   negative dot product of their displacements. One finger leading gives zero,
   both moving together gives a positive number, and neither is a pinch.
 - **Sub-pixel residual** is carried between events so slow drags aren't
-  truncated to zero by integer pixel deltas.
+  truncated to zero by integer pixel deltas. Only the pixel field needs it —
+  the line field is fixed-point and keeps its own fraction, so it takes the
+  frame's own movement untouched. Adding the residual there too would scroll a
+  line-based reader further than the finger moved.
+
+- **The two delta fields are in different units**, and this was wrong for a
+  long time without showing:
+
+  | field | unit | read by |
+  |---|---|---|
+  | `PointDeltaAxis` | pixels | `NSEvent.scrollingDeltaY` |
+  | `FixedPtDeltaAxis` | lines, fixed-point | `NSEvent.deltaY` |
+
+  Both carried the pixel value. Every app that reads `scrollingDeltaY` —
+  AppKit scroll views, browsers — was correct, so scrolling looked right
+  everywhere it was tested. Anything reading `deltaY` got ten times the
+  movement, 154 times a second: Emacs turned that into a torrent of wheel
+  events and escalated them into `double-wheel-up` and `triple-wheel-up`.
+
+  The ratio is not a guess. Build a `.pixel` event of 3, 28 or 100 and read
+  back what CoreGraphics itself put in the fixed-point field: 0.3, 2.8, 10.0.
+  `ScrollSynthesizer.pixelsPerLine` is pinned to that by a test.
+
+  The general shape of this one is worth remembering: the encoding is
+  invisible from inside the process that posts it, so a field being wrong is
+  not a crash or a warning — it is another program behaving strangely. Event
+  construction is now a separate testable function for exactly that reason.
 - Velocity is carried in the recognizer's `scrolling` state, because by the
   time both fingers lift their tracks are gone. A test caught this — momentum
   was silently seeded with zero.

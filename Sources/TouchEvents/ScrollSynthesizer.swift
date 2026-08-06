@@ -203,34 +203,58 @@ public final class ScrollSynthesizer {
     /// When false, `onPost` still fires but nothing reaches the window server.
     public var postsEvents = true
 
-    private func post(delta: Point, phase: Phase?, momentum: MomentumPhase) {
-        onPost?(delta, phase, momentum)
-        guard postsEvents else { return }
+    /// Pixels per line, the ratio CoreGraphics itself uses when converting a
+    /// pixel-unit scroll into the line-based fields.
+    ///
+    /// Not a guess: build a `.pixel` event of 3, 28 and 100 and CoreGraphics
+    /// fills the fixed-point field with 0.3, 2.8 and 10.0.
+    public static let pixelsPerLine = 10.0
 
-        // Carry sub-pixel remainder so slow drags still move.
-        let wanted = Point(x: delta.x + residual.x, y: delta.y + residual.y)
-        let dx = wanted.x.rounded(.towardZero)
-        let dy = wanted.y.rounded(.towardZero)
-        residual = Point(x: wanted.x - dx, y: wanted.y - dy)
+    /// Build the scroll event for a delta. Separate from posting so the field
+    /// encoding can be tested — everything here is invisible from outside the
+    /// process, and one field being wrong looked like working scrolling in
+    /// every app that reads the other one.
+    /// - Parameters:
+    ///   - pixels: whole pixels to scroll, already rounded by the caller,
+    ///     which is where the sub-pixel remainder is carried.
+    ///   - lines: the same movement in lines. Passed separately rather than
+    ///     derived, because it must *not* include the pixel remainder — that
+    ///     is carried into the next frame, and counting it in both places
+    ///     would scroll a line-based reader further than the finger moved.
+    public static func makeEvent(pixels: Point, lines: Point, phase: Phase?,
+                                 momentum: MomentumPhase) -> CGEvent? {
+        let dx = pixels.x.rounded(.towardZero)
+        let dy = pixels.y.rounded(.towardZero)
 
         guard let event = CGEvent(scrollWheelEvent2Source: nil,
                                   units: .pixel,
                                   wheelCount: 2,
                                   wheel1: Int32(clamping: Int(dy)),
                                   wheel2: Int32(clamping: Int(dx)),
-                                  wheel3: 0) else { return }
+                                  wheel3: 0) else { return nil }
 
         // Continuous marks this as trackpad-style scrolling rather than a
         // notched wheel, which is what unlocks smooth per-pixel behaviour.
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+
+        // Two different units, and the pairing is the whole point:
+        //
+        //   PointDelta   pixels — NSEvent.scrollingDeltaY
+        //   FixedPtDelta lines, fixed-point — NSEvent.deltaY
+        //
+        // These carried the same number once, pixels in both. Apps that read
+        // scrollingDeltaY — AppKit scroll views, browsers — were fine, so
+        // scrolling looked correct everywhere it was tested. Anything reading
+        // deltaY saw ten times the scrolling it should, 154 times a second:
+        // Emacs turned that into a torrent of wheel events and escalated them
+        // to double- and triple-wheel-up.
+        //
+        // The fixed-point field keeps the fraction, which is what stops a slow
+        // drag from being truncated away for a line-based reader.
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(dy))
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(dx))
-
-        // The fixed-point fields carry sub-pixel precision. Apps that read them
-        // (AppKit scroll views among them) get genuinely smooth motion instead
-        // of the integer staircase the point deltas alone describe.
-        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: wanted.y)
-        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: wanted.x)
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: lines.y)
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: lines.x)
 
         if let phase {
             event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase.rawValue)
@@ -238,7 +262,25 @@ public final class ScrollSynthesizer {
         if momentum != .none {
             event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum.rawValue)
         }
+        return event
+    }
 
-        event.post(tap: .cghidEventTap)
+    private func post(delta: Point, phase: Phase?, momentum: MomentumPhase) {
+        onPost?(delta, phase, momentum)
+        guard postsEvents else { return }
+
+        // Carry sub-pixel remainder so slow drags still move. Only the pixel
+        // field needs this; the line field is fixed-point and keeps its own
+        // fraction, so it takes the frame's own movement untouched.
+        let wanted = Point(x: delta.x + residual.x, y: delta.y + residual.y)
+        let pixels = Point(x: wanted.x.rounded(.towardZero),
+                           y: wanted.y.rounded(.towardZero))
+        residual = Point(x: wanted.x - pixels.x, y: wanted.y - pixels.y)
+
+        let lines = Point(x: delta.x / ScrollSynthesizer.pixelsPerLine,
+                          y: delta.y / ScrollSynthesizer.pixelsPerLine)
+        ScrollSynthesizer.makeEvent(pixels: pixels, lines: lines,
+                                    phase: phase, momentum: momentum)?
+            .post(tap: .cghidEventTap)
     }
 }

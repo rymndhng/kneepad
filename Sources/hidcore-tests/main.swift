@@ -9,6 +9,7 @@ import Foundation
 runDescriptorTests()
 runContactTrackerTests()
 runScrollRecognizerTests()
+runScrollEventTests()
 runPointerRecognizerTests()
 runAccelerationTests()
 runStopGateTests()
