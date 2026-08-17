@@ -99,7 +99,6 @@ var options = TouchDriver.Options()
 options.verbose = args.contains("--verbose")
 options.dryRun = args.contains("--dry-run")
 options.collectStats = args.contains("--stats")
-options.publishTelemetry = live
 options.surfaceWidthMM = value("--surface")
 
 // Separable from tap-to-click: right-clicking by two-finger tap is the part

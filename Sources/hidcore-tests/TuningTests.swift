@@ -159,61 +159,6 @@ func runTuningTests() {
     }
 }
 
-// The telemetry channel is shared memory between two processes. A mistake is
-// invisible — the panel simply never lights up — so the round trip is pinned.
-
-func runTelemetryTests() {
-    TestRunner.suite("Telemetry") {
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("teach-touch-telemetry-\(UUID().uuidString)")
-            .appendingPathComponent("telemetry.bin")
-
-        TestRunner.test("a published sample is visible to a separate reader") {
-            let writer = try require(TelemetryChannel(url: url, writable: true))
-            writer.publish(speed: 137.5, pixelsPerMillimetre: 21.25, contacts: 1)
-
-            // A distinct instance, as the tuner would have.
-            let reader = try require(TelemetryChannel(url: url, writable: false))
-            let sample = reader.read()
-            expectClose(sample.speed, 137.5, 1e-9)
-            expectClose(sample.pixelsPerMillimetre, 21.25, 1e-9)
-            expectClose(sample.contacts, 1, 1e-9)
-            check(reader.isLive(), "a sample just written must read as live")
-        }
-
-        TestRunner.test("a later write is seen through the same mapping") {
-            let writer = try require(TelemetryChannel(url: url, writable: true))
-            let reader = try require(TelemetryChannel(url: url, writable: false))
-
-            writer.publish(speed: 10, pixelsPerMillimetre: 9.9, contacts: 1)
-            expectClose(reader.read().speed, 10, 1e-9)
-            writer.publish(speed: 480, pixelsPerMillimetre: 52.8, contacts: 2)
-            expectClose(reader.read().speed, 480, 1e-9, "the mapping must stay live")
-        }
-
-        // The mapping outlives the process that made it, so a stale page would
-        // otherwise read as a finger frozen on the pad.
-        TestRunner.test("a stale sample does not read as live") {
-            let writer = try require(TelemetryChannel(url: url, writable: true))
-            writer.publish(speed: 200, pixelsPerMillimetre: 30, contacts: 1)
-            let reader = try require(TelemetryChannel(url: url, writable: false))
-            check(!reader.isLive(within: 0), "a zero window can never be live")
-            check(reader.isLive(within: 5), "and a generous one always is")
-        }
-
-        TestRunner.test("reading before the driver has ever run fails cleanly") {
-            let missing = FileManager.default.temporaryDirectory
-                .appendingPathComponent("teach-touch-none-\(UUID().uuidString)")
-                .appendingPathComponent("telemetry.bin")
-            expectNil(TelemetryChannel(url: missing, writable: false),
-                      "the panel must cope with starting first")
-        }
-
-        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
-    }
-}
-
 // The lock is what stops two drivers from fighting over Input Mode, and the
 // failure is expensive — no usable cursor — so the exclusion is pinned here.
 

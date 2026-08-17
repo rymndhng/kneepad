@@ -513,7 +513,7 @@ Consequences of embedding, each of which needed a fix:
   switches to event-tracking mode for the whole of a slider drag, and a source
   registered only in the default mode goes quiet for that entire time — the
   trackpad would die while you dragged the slider tuning it. Same for the
-  telemetry timer that drives the plot.
+  motion timer that drives the plot.
 - **Quitting has to restore mouse mode.** `applicationWillTerminate` calls
   `stopDriver()`. A hard kill still can't, which is what `hid-stream --restore`
   is for.
@@ -606,7 +606,7 @@ Three fixes, in the order they matter:
   running; only the display work stops. **24% → 0.8%.**
 - **Cache the indicator colour.** `controlAccentColor` is a dynamic colour, and
   resolving it goes through the appearance into CoreUI's theme store. It was
-  being resolved on every telemetry tick and inside every draw. `sample`
+  being resolved on every motion tick and inside every draw. `sample`
   showed it plainly. Invalidated on `viewDidChangeEffectiveAppearance` and
   `systemColorsDidChange`. **Visible with the plot animating: 24% → 11%.**
 - **Never assign a value that has not changed.** `liveSpeed` redraws the whole
@@ -621,10 +621,9 @@ this badly, showing an apparently idle main thread for a process burning 20%.
 counter written to a file settled what `sample` could not: whether the view
 was being repainted at all.
 
-The plot can be driven without hardware by writing samples into
-`telemetry.bin` — 32 bytes of little-endian doubles, speed / px-per-mm /
-`CLOCK_UPTIME_RAW` seconds / contacts — which is how the numbers above were
-taken.
+The numbers above were taken by driving the plot without hardware, which at the
+time meant writing samples into the shared `telemetry.bin`. That page is gone;
+feeding the plot now means setting `driver.motion` from inside the process.
 
 Settings still go to `~/Library/Application Support/teach-touch/tuning.json`,
 so a headless `touchd` picks up the same values through its file watcher. In
@@ -638,17 +637,19 @@ menu bar, and it cannot be focused properly. The bundle is what makes it a real
 app, and TCC will not hold a grant for a loose binary in a build directory
 anyway. Copy it to `/Applications` to keep it.
 
-While `touchd` runs, the plot marks **where your finger is on the curve right
-now** — a dot at the current speed, with a fading trail of the last ~1.5 s. That
-is the question the knee setting actually turns on: not what the curve looks
-like, but where your own gestures land against it.
+The plot marks **where your finger is on the curve right now** — a dot at the
+current speed, with a fading trail of the last ~1.5 s. That is the question the
+knee setting actually turns on: not what the curve looks like, but where your
+own gestures land against it.
 
-The driver publishes speed through `TouchEvents/Telemetry.swift`, a one-slot
-mmap'd page. Shared memory rather than a socket or a file rewrite because the
-publish happens inside the HID callback ~154 times a second, and that callback
-has a 6.5 ms budget it has already blown once. A store into a mapped page costs
-no syscall, so nothing watching can slow the driver down — and neither can
-nothing watching it.
+The driver records speed into `TouchDriver.motion`, which the panel reads at
+60 Hz. This used to be a one-slot mmap'd page shared with a separate `touchd`
+process; now that the app runs its own driver there is no second process to
+share with, and a stale page on disk read as a live driver after a reboot — the
+uptime clock it stamped had gone backwards. A stored struct read at display
+rate keeps the property that mattered: the HID callback has a 6.5 ms budget it
+has already blown once, and writing a struct cannot drag it into the panel's
+work.
 
 Sliders commit **on release**, not while dragging. A continuous slider fires on
 every tick of travel, and writing each one floods the watcher with reloads for

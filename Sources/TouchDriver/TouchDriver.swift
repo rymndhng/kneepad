@@ -55,9 +55,6 @@ public final class TouchDriver {
         public var verbose = false
         public var collectStats = false
 
-        /// Publish speed to the shared-memory slot the tuner plots.
-        public var publishTelemetry = true
-
         /// Override for a unit whose sensor differs from the measured 40 mm.
         public var surfaceWidthMM: Double?
 
@@ -89,11 +86,35 @@ public final class TouchDriver {
 
     public var options: Options
 
+    /// Where the pointer is on the acceleration curve right now, for a UI in
+    /// this process to plot.
+    ///
+    /// A stored value read at display rate rather than a callback fired per
+    /// report: the frame handler has a 6.5 ms budget and publishes ~154 times a
+    /// second, while nothing watching it needs more than 60. Writing a struct
+    /// costs the handler nothing and cannot drag it into the watcher's work.
+    public struct Motion {
+        public var speed = 0.0
+        public var pixelsPerMillimetre = 0.0
+        public var contacts = 0
+        /// Monotonic seconds, so a reader can tell a rested hand from a driver
+        /// that has stopped reporting. See `TouchDriver.now`.
+        public var at = 0.0
+
+        public init() {}
+    }
+
+    public private(set) var motion = Motion()
+
+    /// Monotonic seconds since boot. Only differences are meaningful.
+    public static var now: Double {
+        Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+    }
+
     private let scrollRecognizer = ScrollRecognizer()
     private let pointerSynthesizer: PointerSynthesizer
     private let scrollSynthesizer: ScrollSynthesizer
     private var tracker: ContactTracker?
-    private var telemetry: TelemetryChannel?
     private var lock: DriverLock?
 
     private var lastWall = Date()
@@ -194,7 +215,6 @@ public final class TouchDriver {
         }
 
         tracker = ContactTracker(layout: session.layout)
-        telemetry = options.publishTelemetry ? TelemetryChannel(writable: true) : nil
 
         session.onFraming = { [weak self] _, _, _, _ in self?.onReady?() }
         session.onForeignReport = { [weak self] reportID, _ in
@@ -241,7 +261,7 @@ public final class TouchDriver {
         if !options.dryRun { pointerSynthesizer.releaseAll() }
         session?.restoreMouseMode(log: { [weak self] in self?.log($0) })
         session?.stop()
-        telemetry = nil
+        motion = Motion()
         // Last, so the pad is back in mouse mode before anything else is let in.
         lock = nil
         if let activity {
@@ -279,7 +299,7 @@ public final class TouchDriver {
     private var recent: [(at: Double, interval: Double?, handler: Double)] = []
 
     public func health(window seconds: Double = 1.5) -> Health? {
-        let cutoff = TelemetryChannel.now - seconds
+        let cutoff = TouchDriver.now - seconds
         let samples = recent.filter { $0.at >= cutoff }
         let gaps = samples.compactMap(\.interval)
         guard gaps.count > 5 else { return nil }
@@ -293,7 +313,7 @@ public final class TouchDriver {
     }
 
     private func record(interval: Double?, handler: Double) {
-        let now = TelemetryChannel.now
+        let now = TouchDriver.now
         recent.append((at: now, interval: interval, handler: handler))
         // Two seconds of frames is ~310 at the nominal rate. Trimming in one
         // slice rather than per element keeps this off the frame budget.
@@ -379,18 +399,19 @@ public final class TouchDriver {
             log("no tap: \(reason)")
         }
 
-        // Publish before filtering, so the panel shows the speed the curve
-        // sees even for motion the stop gate is about to drop.
-        if let telemetry {
-            var speed = 0.0
-            for case .move(let millimetres) in pointerEvents where dt > 0 {
-                speed = millimetres.magnitude / dt
-            }
-            telemetry.publish(speed: speed,
-                              pixelsPerMillimetre: pointerSynthesizer.configuration
-                                  .pixelsPerMillimetre(atSpeed: speed),
-                              contacts: tracks.count)
+        // Record before filtering, so the panel shows the speed the curve sees
+        // even for motion the stop gate is about to drop.
+        var speed = 0.0
+        for case .move(let millimetres) in pointerEvents where dt > 0 {
+            speed = millimetres.magnitude / dt
         }
+        var sample = Motion()
+        sample.speed = speed
+        sample.pixelsPerMillimetre =
+            pointerSynthesizer.configuration.pixelsPerMillimetre(atSpeed: speed)
+        sample.contacts = tracks.count
+        sample.at = TouchDriver.now
+        motion = sample
 
         for event in pointerEvents {
             // Filter before synthesising, not after — otherwise disabling taps

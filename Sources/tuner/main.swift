@@ -48,7 +48,7 @@ final class CurveView: NSView {
     /// accent's own hue halfway round the wheel, which stays distinct from any
     /// of them. Graphite has no hue to rotate, so it falls back to orange.
     /// Cached, because resolving it is not cheap and it is asked for on every
-    /// telemetry tick as well as every draw. `controlAccentColor` is a dynamic
+    /// motion tick as well as every draw. `controlAccentColor` is a dynamic
     /// colour: resolving it goes through the appearance and into CoreUI's
     /// theme store, which showed up in a profile at 60 Hz. It changes only
     /// when the user picks a different accent or the appearance flips, and
@@ -558,7 +558,7 @@ final class LiveReadout: NSStackView {
     }
 
     func update(speed value: Double, tuning: Tuning, touching: Bool, accent: NSColor) {
-        let now = TelemetryChannel.now
+        let now = TouchDriver.now
         if touching, value > peakSpeed || now - peakAt > peakHold {
             peakSpeed = value
             peakAt = now
@@ -751,7 +751,7 @@ final class TunerController: NSObject, NSWindowDelegate {
             return scroll
         }
 
-        startTelemetry()
+        startMotionPolling()
 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
@@ -1064,27 +1064,28 @@ final class TunerController: NSObject, NSWindowDelegate {
 
     // MARK: Live position on the curve
 
-    private var telemetry: TelemetryChannel?
-    private var telemetryTimer: Timer?
+    private var motionTimer: Timer?
 
-    /// Polls the driver's shared-memory slot at display rate.
+    /// Polls the driver's latest motion at display rate.
     ///
-    /// Polling rather than being pushed: the driver must not block on, or even
-    /// know about, anything watching it. Reopening on failure covers the panel
-    /// being started before the driver.
-    private func startTelemetry() {
+    /// Polling rather than being pushed: the driver reports ~154 times a second
+    /// from inside its frame handler, which has a 6.5 ms budget and must not be
+    /// made to repaint a curve. Sixty reads a second is all a plot can show.
+    private func startMotionPolling() {
         // Common modes, or the plot freezes for the whole of a slider drag —
         // which is exactly when it is being watched.
         let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-            self?.pollTelemetry()
+            self?.pollMotion()
         }
         RunLoop.main.add(timer, forMode: .common)
-        telemetryTimer = timer
+        motionTimer = timer
     }
 
-    private func pollTelemetry() {
-        if telemetry == nil { telemetry = TelemetryChannel(writable: false) }
-        guard let telemetry, telemetry.isLive() else {
+    private func pollMotion() {
+        // `at` going stale covers the driver not running yet, or having stopped
+        // — the last sample would otherwise read as a finger frozen mid-swipe.
+        let motion = driver?.motion ?? TouchDriver.Motion()
+        guard motion.at > 0, TouchDriver.now - motion.at < 0.4 else {
             setLiveSpeed(nil)
             if !curve.trail.isEmpty { curve.trail.removeAll(); curve.needsDisplay = true }
             readout.update(speed: 0, tuning: tuning, touching: false,
@@ -1092,13 +1093,12 @@ final class TunerController: NSObject, NSWindowDelegate {
             return
         }
 
-        let sample = telemetry.read()
-        let touching = sample.contacts > 0 && sample.speed > 0
-        setLiveSpeed(touching ? sample.speed : nil)
-        readout.update(speed: sample.speed, tuning: tuning, touching: touching,
+        let touching = motion.contacts > 0 && motion.speed > 0
+        setLiveSpeed(touching ? motion.speed : nil)
+        readout.update(speed: motion.speed, tuning: tuning, touching: touching,
                        accent: curve.indicatorColor)
         if touching {
-            curve.trail.append(sample.speed)
+            curve.trail.append(motion.speed)
             if curve.trail.count > 90 { curve.trail.removeFirst() }   // ~1.5s
         } else if !curve.trail.isEmpty {
             curve.trail.removeFirst()
@@ -1132,12 +1132,12 @@ final class TunerController: NSObject, NSWindowDelegate {
     /// of that is worth a single cycle behind another window or in the Dock.
     private func updatePolling() {
         let wanted = plotIsVisible
-        guard wanted != (telemetryTimer != nil) else { return }
+        guard wanted != (motionTimer != nil) else { return }
         if wanted {
-            startTelemetry()
+            startMotionPolling()
         } else {
-            telemetryTimer?.invalidate()
-            telemetryTimer = nil
+            motionTimer?.invalidate()
+            motionTimer = nil
             // Come back showing the present rather than a frozen gesture from
             // whenever the window was last covered.
             curve.liveSpeed = nil
