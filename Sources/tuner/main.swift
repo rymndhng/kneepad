@@ -1,6 +1,7 @@
 import AppKit
 import TouchDriver
 import TouchEvents
+import os
 
 // Teach Touch — the trackpad driver and its tuning panel, in one app.
 //
@@ -875,6 +876,10 @@ final class TunerController: NSObject, NSWindowDelegate {
 
     // MARK: - The embedded driver
 
+    /// The driver's own transcript and per-report diagnostics. Console rather
+    /// than the window: neither belongs in a one-line footer.
+    static let log = Logger(subsystem: "dev.rymndhng.teach-touch", category: "driver")
+
     private var driver: TouchDriver?
     private var retryTimer: Timer?
     private var promptedForAccessibility = false
@@ -894,9 +899,15 @@ final class TunerController: NSObject, NSWindowDelegate {
 
         let driver = TouchDriver(options: options)
         tuning.apply(to: driver.pointerRecognizer)
-        // Console rather than the window: these are per-report diagnostics and
-        // a startup transcript, neither of which belongs in a one-line footer.
-        driver.onLog = { NSLog("teach-touch: %@", $0) }
+        // Not NSLog. Its arguments are private data to the unified log, so
+        // every line landed as `(Foundation) <private>` and the message text
+        // reached nowhere at all — the driver's startup transcript could not be
+        // found on disk while chasing the drag bug, which is a bad way to
+        // discover that your only diagnostics are write-only. `.public` is
+        // deliberate: none of this is user content.
+        //
+        //   log stream --predicate 'subsystem == "dev.rymndhng.teach-touch"'
+        driver.onLog = { TunerController.log.notice("\($0, privacy: .public)") }
         driver.onForeignReport = { [weak self] reportID in
             self?.show("Device fell back to mouse mode (report \(reportID))", .systemOrange)
         }
@@ -932,7 +943,7 @@ final class TunerController: NSObject, NSWindowDelegate {
             // consulted when the device is opened, and only takes effect for
             // this app once it is relaunched.
             show("Could not open the trackpad: \(error)", .systemRed)
-            NSLog("teach-touch: driver failed to start: %@", "\(error)")
+            TunerController.log.error("driver failed to start: \("\(error)", privacy: .public)")
             scheduleRetry()
         }
     }

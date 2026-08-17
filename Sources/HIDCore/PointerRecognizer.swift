@@ -1,6 +1,6 @@
 import Foundation
 
-public enum MouseButton {
+public enum MouseButton: CaseIterable {
     case left, right, middle
 }
 

@@ -133,8 +133,25 @@ public final class PointerSynthesizer {
 
     // MARK: Motion
 
+    /// Which button a drag should be attributed to, whoever is holding it.
+    ///
+    /// `buttonState` only knows about presses this driver synthesised, and the
+    /// click does not have to come from the pad at all — a separate mouse, or a
+    /// key mapped to a mouse button, holds the button while the pad still owns
+    /// the motion. Judging by our own state alone posted `mouseMoved` for the
+    /// whole gesture, and AppKit's drag tracking loops wait on
+    /// `…MouseDragged`: a window drag or rubber-band selection never saw the
+    /// drag, and only jumped to its final position when the real mouseUp
+    /// arrived. The cursor moved the whole time, which is what made this look
+    /// like a rendering problem rather than a wrong event type.
+    ///
+    /// The system query costs ~0.13 µs, measured — nothing against the frame
+    /// budget, unlike reading the cursor position back.
     private var anyButtonDown: MouseButton? {
-        buttonState.first { $0.value }?.key
+        if let ours = buttonState.first(where: { $0.value })?.key { return ours }
+        return MouseButton.allCases.first {
+            CGEventSource.buttonState(.combinedSessionState, button: cgButton($0))
+        }
     }
 
     private func move(_ millimetres: Point, dt: Double) {

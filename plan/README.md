@@ -227,6 +227,18 @@ everything mouse mode did, so the pad stays usable while it runs.
   two-finger tap.
 - Physical buttons are edge-detected; drags post `…MouseDragged` rather than
   `mouseMoved`, or text selection breaks.
+- **The held button is read from system-wide state, not just our own.** The
+  click does not have to come from the pad: a separate mouse, or a key mapped to
+  a mouse button, holds it while the pad still supplies the motion. Judging by
+  `buttonState` alone meant posting `mouseMoved` for the whole gesture, and
+  AppKit's drag tracking loops wait on `…MouseDragged` — so a window drag or a
+  rubber-band selection never saw the drag at all and only jumped to its final
+  position when the real mouseUp arrived. The cursor moved the whole time, which
+  made it look like a rendering problem rather than a wrong event type. Firefox
+  was unaffected, because it tracks button state itself instead of running an
+  AppKit tracking loop; that split — same gesture, some apps fine — is the
+  signature to recognise next time. `CGEventSourceButtonState` costs ~0.13 µs,
+  so this is affordable per frame, unlike reading the cursor position back.
 - Saturating acceleration curve — raw deltas feel awful.
 - `releaseAll()` on shutdown so a crash mid-drag can't leave a button stuck
   down for the rest of the login session.
