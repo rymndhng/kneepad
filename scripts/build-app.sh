@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 # Wraps the `tuner` executable in a .app bundle so it can be launched from
 # Finder or Spotlight rather than a terminal.
 #
@@ -61,8 +61,8 @@ PLIST
 #
 # See scripts/create-signing-identity.sh — it is a one-time setup, and this
 # falls back to ad-hoc if it has not been run.
-IDENTITY="Teach Touch Local"
-KEYCHAIN="$HOME/Library/Keychains/teach-touch-signing.keychain"
+IDENTITY="Teach Touch"
+KEYCHAIN="$HOME/Library/Keychains/teach-touch-signing.keychain-db"
 
 if security find-identity -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "$IDENTITY"; then
     security unlock-keychain -p teach-touch "$KEYCHAIN" 2>/dev/null || true
