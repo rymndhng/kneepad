@@ -2,8 +2,9 @@
 # Install touchd as a LaunchAgent so the trackpad works without any app open.
 #
 # This is the headless option. Teach Touch.app drives the pad itself while it
-# is open, so you want one or the other: the app steps aside when it sees this
-# agent already running, and touchd refuses to start if the app has the pad.
+# is open, so you want one or the other: whichever starts first takes the
+# driver lock, and the other steps aside — the app keeps tuning through the
+# file, and touchd says who has it and exits.
 #
 # IMPORTANT: TCC permissions are per-binary, not per-user. The copy installed
 # here is a different binary from the one you have been running under your

@@ -887,16 +887,6 @@ final class TunerController: NSObject, NSWindowDelegate {
     private func startDriver() {
         guard driver == nil else { return }
 
-        // Two drivers both flipping Input Mode and both posting events is the
-        // one failure mode that costs you the cursor entirely. If a LaunchAgent
-        // copy is already running, leave it alone — the panel still tunes it
-        // through the file, which is what it did before it grew a driver.
-        guard !TouchDriver.isAnotherDriverRunning() else {
-            show("Another touchd is running — tuning that one", .systemOrange)
-            scheduleRetry()
-            return
-        }
-
         var options = TouchDriver.Options()
         tuning.apply(to: &options.pointer)
         tuning.apply(to: &options.scroll)
@@ -930,6 +920,12 @@ final class TunerController: NSObject, NSWindowDelegate {
             scheduleRetry()
         } catch DriverError.deviceNotFound {
             show("Trackpad not found — is the board plugged in?", .secondaryLabelColor)
+            scheduleRetry()
+        } catch DriverError.alreadyRunning {
+            // Almost always the LaunchAgent. Leave the pad to it — the panel
+            // still tunes it through the file, which is what it did before it
+            // grew a driver — and pick it up if that copy is quit.
+            show("Another touchd is running — tuning that one", .systemOrange)
             scheduleRetry()
         } catch {
             // Most often Input Monitoring, which unlike Accessibility is only

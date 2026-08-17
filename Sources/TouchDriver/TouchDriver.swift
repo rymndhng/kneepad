@@ -19,6 +19,9 @@ public enum DriverError: Error, CustomStringConvertible {
     /// No digitizer found. Restated here rather than passed through as
     /// `SessionError` so a front end can report it without importing HIDCore.
     case deviceNotFound
+    /// Another process holds the driver lock. The pid is whoever wrote the
+    /// lock file, or nil if it could not be read.
+    case alreadyRunning(pid: Int32?)
 
     public var description: String {
         switch self {
@@ -26,6 +29,9 @@ public enum DriverError: Error, CustomStringConvertible {
             return "Accessibility permission is required to post events"
         case .deviceNotFound:
             return SessionError.noDigitizer.description
+        case .alreadyRunning(let pid):
+            return pid.map { "Another teach-touch driver is running (pid \($0))" }
+                ?? "Another teach-touch driver is running"
         }
     }
 }
@@ -49,8 +55,7 @@ public final class TouchDriver {
         public var verbose = false
         public var collectStats = false
 
-        /// Publish speed to the shared-memory slot the tuner plots. Also how
-        /// two drivers notice each other — see `isAnotherDriverRunning`.
+        /// Publish speed to the shared-memory slot the tuner plots.
         public var publishTelemetry = true
 
         /// Override for a unit whose sensor differs from the measured 40 mm.
@@ -89,6 +94,7 @@ public final class TouchDriver {
     private let scrollSynthesizer: ScrollSynthesizer
     private var tracker: ContactTracker?
     private var telemetry: TelemetryChannel?
+    private var lock: DriverLock?
 
     private var lastWall = Date()
     private var previousContactCount = 0
@@ -102,18 +108,6 @@ public final class TouchDriver {
         self.pointerSynthesizer = PointerSynthesizer(configuration: options.pointer)
         self.scrollSynthesizer = ScrollSynthesizer(configuration: options.scroll)
         self.pointerRecognizer.twoFingerTapEnabled = options.tapEnabled
-    }
-
-    /// True if some other process is already driving the pad.
-    ///
-    /// Two drivers both flipping Input Mode and both posting events is the one
-    /// failure mode that leaves the machine unusable, so the app checks before
-    /// starting its own. Detection is by telemetry freshness rather than by
-    /// asking launchd, because it catches a driver started any way at all —
-    /// LaunchAgent, terminal, or a second copy of the app. A driver run with
-    /// telemetry off is invisible to this, which is the documented cost.
-    public static func isAnotherDriverRunning() -> Bool {
-        TelemetryChannel(writable: false)?.isLive() ?? false
     }
 
     public var pointerConfiguration: PointerSynthesizer.Configuration {
@@ -148,6 +142,24 @@ public final class TouchDriver {
         if !options.dryRun && !ScrollSynthesizer.hasAccessibilityPermission() {
             throw DriverError.accessibilityDenied
         }
+
+        // Before the device is touched, and before Input Mode is flipped: a
+        // second driver that gets as far as unlocking multitouch and then backs
+        // out has already taken the pad away from the first one.
+        //
+        // A dry run posts nothing and drives nothing, so it does not compete
+        // for this — that is how the pipeline stays exercisable while the real
+        // driver runs.
+        if !options.dryRun {
+            guard let held = DriverLock.acquire() else {
+                throw DriverError.alreadyRunning(pid: DriverLock.holderPID())
+            }
+            lock = held
+        }
+        // Every failure below this point leaves the caller free to retry, and a
+        // driver that is not running must not be sitting on the lock while it
+        // waits for the board to be plugged in.
+        defer { if !isRunning { lock = nil } }
 
         let session: TouchSession
         do {
@@ -230,6 +242,8 @@ public final class TouchDriver {
         session?.restoreMouseMode(log: { [weak self] in self?.log($0) })
         session?.stop()
         telemetry = nil
+        // Last, so the pad is back in mouse mode before anything else is let in.
+        lock = nil
         if let activity {
             ProcessInfo.processInfo.endActivity(activity)
             self.activity = nil

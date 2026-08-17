@@ -16,6 +16,7 @@ runStopGateTests()
 runCalibrationTests()
 runTuningTests()
 runTelemetryTests()
+runDriverLockTests()
 runScrollDirectionTests()
 runMomentumPhaseTests()
 

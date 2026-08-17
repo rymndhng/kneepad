@@ -270,18 +270,6 @@ atexit {
 
 // MARK: - Run
 
-// The tuning app runs a driver too, and two of them both flipping Input Mode
-// and both posting events is the one failure mode that costs you the cursor.
-if TouchDriver.isAnotherDriverRunning() {
-    print("""
-    Another teach-touch driver is already running — most likely the tuning app,
-    or the LaunchAgent copy. Quit that one first:
-
-      launchctl bootout gui/$UID/dev.rymndhng.teach-touch
-    """)
-    exit(1)
-}
-
 do {
     try driver.start()
 } catch DriverError.accessibilityDenied {
@@ -294,6 +282,16 @@ do {
     Requesting now — approve, then re-run.
     """)
     _ = ScrollSynthesizer.hasAccessibilityPermission(prompt: true)
+    exit(1)
+} catch DriverError.alreadyRunning(let pid) {
+    // Two drivers both flipping Input Mode and both posting events is the one
+    // failure mode that costs you the cursor, so this refuses rather than races.
+    print("""
+    Another teach-touch driver is already running\(pid.map { " (pid \($0))" } ?? "") —
+    most likely the tuning app, or the LaunchAgent copy. Quit that one first:
+
+      launchctl bootout gui/$UID/dev.rymndhng.teach-touch
+    """)
     exit(1)
 } catch let error as DriverError {
     print("\(error)")

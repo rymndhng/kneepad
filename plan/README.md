@@ -501,12 +501,14 @@ is per-binary, so the panel and the driver held separate grants and any
 Consequences of embedding, each of which needed a fix:
 
 - **Two drivers must never run at once.** Both would flip Input Mode and both
-  would post events, and the failure mode is losing the cursor. The app checks
-  `TouchDriver.isAnotherDriverRunning()` before starting and leaves the pad to
-  a running LaunchAgent, tuning it through the file as before; `touchd` refuses
-  to start when the app has it. Detection is by telemetry freshness, so it
-  catches a driver started any way at all — the cost is that a driver run with
-  telemetry off is invisible to it.
+  would post events, and the failure mode is losing the cursor. `start()` takes
+  an exclusive `flock` on `driver.pid` before it touches the device, and throws
+  `DriverError.alreadyRunning` if someone else has it: `touchd` prints who and
+  exits, the app leaves the pad to the LaunchAgent and tunes it through the
+  file as before. A lock rather than comparing pids, because the kernel drops
+  it however the holder exits — a `kill -9` leaves the file behind but not the
+  lock. This replaces a check by telemetry freshness that read a stale page
+  from before a reboot as a live driver, and refused to start anything at all.
 - **HID reports must be scheduled in the run loop's *common* modes.** AppKit
   switches to event-tracking mode for the whole of a slider drag, and a source
   registered only in the default mode goes quiet for that entire time — the
@@ -515,8 +517,8 @@ Consequences of embedding, each of which needed a fix:
 - **Quitting has to restore mouse mode.** `applicationWillTerminate` calls
   `stopDriver()`. A hard kill still can't, which is what `hid-stream --restore`
   is for.
-- **Failures are recoverable, not fatal.** No device, no Accessibility, another
-  driver running — each shows in the footer and retries every 3 s, so plugging
+- **Failures are recoverable, not fatal.** No device, no Accessibility, the
+  lock held elsewhere — each shows in the footer and retries every 3 s, so plugging
   the board in or granting a permission works without relaunching.
 - **The panel has to stop drawing when nobody is looking.** Measured below.
 

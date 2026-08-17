@@ -214,6 +214,68 @@ func runTelemetryTests() {
     }
 }
 
+// The lock is what stops two drivers from fighting over Input Mode, and the
+// failure is expensive — no usable cursor — so the exclusion is pinned here.
+
+func runDriverLockTests() {
+    TestRunner.suite("Driver lock") {
+
+        func scratchURL() -> URL {
+            FileManager.default.temporaryDirectory
+                .appendingPathComponent("teach-touch-lock-\(UUID().uuidString)")
+                .appendingPathComponent("driver.pid")
+        }
+
+        TestRunner.test("a second acquire is refused while the first is held") {
+            let url = scratchURL()
+            defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+            let first = try require(DriverLock.acquire(url: url))
+            expectNil(DriverLock.acquire(url: url), "two drivers must never both run")
+            _ = first   // held until here, or the check above proves nothing
+        }
+
+        TestRunner.test("releasing lets the next driver in") {
+            let url = scratchURL()
+            defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+            var first: DriverLock? = DriverLock.acquire(url: url)
+            check(first != nil, "the first acquire must succeed")
+            first = nil
+
+            let second = DriverLock.acquire(url: url)
+            check(second != nil, "quitting one driver must let the next start")
+            _ = second
+        }
+
+        TestRunner.test("the holder is named so a refusal can say who") {
+            let url = scratchURL()
+            defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+            let held = try require(DriverLock.acquire(url: url))
+            expectEqual(DriverLock.holderPID(url: url),
+                        ProcessInfo.processInfo.processIdentifier)
+            _ = held
+        }
+
+        // The file outliving its holder is the whole reason this is a lock and
+        // not a pid comparison: a crashed driver leaves the pid behind, and
+        // reading it as live is how the machine ends up with no working driver.
+        TestRunner.test("a file left behind by a dead holder does not block") {
+            let url = scratchURL()
+            defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // A pid that is not us and is not running.
+            try "999999\n".write(to: url, atomically: true, encoding: .utf8)
+
+            check(DriverLock.acquire(url: url) != nil,
+                  "a stale pid file must not lock the trackpad out forever")
+        }
+    }
+}
+
 // Scroll direction was inverted in shipped code: what the configuration called
 // "natural" produced the opposite of macOS's natural scrolling, and --reverse
 // produced the right thing. Pinned here so it cannot silently flip back.
