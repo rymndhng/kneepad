@@ -71,7 +71,11 @@ public final class TouchDriver {
     /// Fired when contacts start flowing.
     public var onReady: (() -> Void)?
     /// The device dropped back to mouse mode, reporting something unexpected.
+    /// The driver puts it back on its own; this is for saying so.
     public var onForeignReport: ((UInt8) -> Void)?
+    /// Fired when the driver's grip on the pad changes — lost, regained, or
+    /// found in the wrong mode. See `Link`.
+    public var onLinkChange: ((Link) -> Void)?
 
     // MARK: State
 
@@ -121,6 +125,10 @@ public final class TouchDriver {
     private var previousContactCount = 0
     private var stopped = false
     private var activity: NSObjectProtocol?
+
+    private var watchdog: Timer?
+    private var lastProbe = Date()
+    private var lastReassert = 0.0
 
     public private(set) var stats = FeelStats()
 
@@ -182,45 +190,8 @@ public final class TouchDriver {
         // waits for the board to be plugged in.
         defer { if !isRunning { lock = nil } }
 
-        let session: TouchSession
-        do {
-            session = try TouchSession.discover()
-        } catch SessionError.noDigitizer {
-            throw DriverError.deviceNotFound
-        }
-        self.session = session
-
-        // The descriptor's claimed surface is already corrected at discovery
-        // (see ZSA.measuredSurfaceWidthMM); this is only for a unit whose
-        // sensor is a different size.
-        if let trueWidth = options.surfaceWidthMM,
-           let declared = session.layout.declaredSurfaceSize, declared.x > 0 {
-            session.layout.positionScale = trueWidth / declared.x
-            log(String(format: "Calibration   overriding %.0f mm with %.0f mm",
-                       ZSA.measuredSurfaceWidthMM, trueWidth))
-        }
-
-        onDeviceReady?(session)
-
-        try session.open()
-        do {
-            try session.enableMultitouch(log: { [weak self] in self?.log($0) })
-        } catch {
-            // Let go of the device rather than leaving it open in a driver
-            // that never started — a caller retrying would otherwise stack up
-            // an open handle per attempt.
-            session.stop()
-            self.session = nil
-            throw error
-        }
-
-        tracker = ContactTracker(layout: session.layout)
-
-        session.onFraming = { [weak self] _, _, _, _ in self?.onReady?() }
-        session.onForeignReport = { [weak self] reportID, _ in
-            self?.onForeignReport?(reportID)
-        }
-        session.onFrame = { [weak self] frame, _ in self?.handle(frame) }
+        stopped = false
+        try attach(firstTime: true)
 
         // Opt out of App Nap and timer coalescing for as long as we are
         // driving.
@@ -240,10 +211,74 @@ public final class TouchDriver {
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
             reason: "driving the trackpad")
 
-        lastWall = Date()
-        previousContactCount = 0
-        stopped = false
         isRunning = true
+        startWatchdog()
+    }
+
+    /// Find the pad, unlock multitouch, and start streaming from it.
+    ///
+    /// Split out of `start()` because the watchdog runs it again. Recovery has
+    /// to be a fresh discovery rather than a retry on the handle we were
+    /// holding: a pad that re-enumerates over sleep or a replug comes back as a
+    /// different `IOHIDDevice`, with Input Mode reset to 0.
+    private func attach(firstTime: Bool) throws {
+        let session: TouchSession
+        do {
+            session = try TouchSession.discover()
+        } catch SessionError.noDigitizer {
+            throw DriverError.deviceNotFound
+        }
+
+        // The descriptor's claimed surface is already corrected at discovery
+        // (see ZSA.measuredSurfaceWidthMM); this is only for a unit whose
+        // sensor is a different size.
+        if let trueWidth = options.surfaceWidthMM,
+           let declared = session.layout.declaredSurfaceSize, declared.x > 0 {
+            session.layout.positionScale = trueWidth / declared.x
+            log(String(format: "Calibration   overriding %.0f mm with %.0f mm",
+                       ZSA.measuredSurfaceWidthMM, trueWidth))
+        }
+
+        // The full summary is a startup thing. A reattach gets one line —
+        // it happens every time the machine wakes, and it is the reattach
+        // *count* that is interesting by then, not the pipeline again.
+        if firstTime {
+            onDeviceReady?(session)
+        } else {
+            log("pad back — \(session.device.info.summary)")
+        }
+
+        try session.open()
+        do {
+            try session.enableMultitouch(log: { [weak self] in self?.log($0) })
+        } catch {
+            // Let go of the device rather than leaving it open in a driver
+            // that never started — a caller retrying would otherwise stack up
+            // an open handle per attempt.
+            session.stop()
+            throw error
+        }
+
+        // Assigned only now that it is open and switched, so a failed attach
+        // cannot leave the watchdog probing a handle we never got working.
+        self.session = session
+        tracker = ContactTracker(layout: session.layout)
+
+        session.onFraming = { [weak self] _, _, _, _ in self?.onReady?() }
+        session.onForeignReport = { [weak self] reportID, _ in
+            guard let self else { return }
+            self.onForeignReport?(reportID)
+            // Report 6 is the mouse fallback: the pad has reset itself and has
+            // stopped sending contacts. Put it back, rather than only saying
+            // that it happened.
+            self.reassertMultitouch(because: "report \(reportID)")
+        }
+        session.onFrame = { [weak self] frame, _ in self?.handle(frame) }
+
+        lastWall = Date()
+        lastProbe = Date()
+        previousContactCount = 0
+        setLink(.live)
         session.start()
     }
 
@@ -256,17 +291,171 @@ public final class TouchDriver {
         guard !stopped else { return }
         stopped = true
         isRunning = false
+        watchdog?.invalidate()
+        watchdog = nil
         scrollSynthesizer.cancelMomentum()
         // Never leave a button stuck down for the rest of the login session.
         if !options.dryRun { pointerSynthesizer.releaseAll() }
         session?.restoreMouseMode(log: { [weak self] in self?.log($0) })
         session?.stop()
         motion = Motion()
+        // Assigned, not `setLink`: a deliberate teardown is not a link event,
+        // and firing one here made Ctrl-C report the pad as disconnected.
+        link = .lost
         // Last, so the pad is back in mouse mode before anything else is let in.
         lock = nil
         if let activity {
             ProcessInfo.processInfo.endActivity(activity)
             self.activity = nil
+        }
+    }
+
+    // MARK: Staying attached
+
+    /// How the driver's grip on the pad looks right now.
+    public enum Link: Equatable {
+        /// Open, in multitouch mode, frames expected.
+        case live
+        /// Present and answering, but in mouse mode, and the write to put it
+        /// back was refused. Retried on every probe.
+        case mouseMode
+        /// Gone. Rediscovering on every probe.
+        case lost
+    }
+
+    public private(set) var link: Link = .lost
+
+    /// Seconds between health probes, and so the worst-case recovery delay.
+    public var probeInterval = 2.0
+
+    private func setLink(_ new: Link) {
+        guard link != new else { return }
+        link = new
+        onLinkChange?(new)
+    }
+
+    /// Watch for the pad going away, because nothing else tells us.
+    ///
+    /// Discovery is one-shot and the frame callback is the only thing that
+    /// would report otherwise — but the pad sends nothing at all while it is
+    /// untouched, so silence is indistinguishable from an idle hand. Hence an
+    /// active probe. Reading Input Mode back answers both questions at once: a
+    /// read that throws means the handle is dead, and a read that returns 0
+    /// means the pad reset itself and is in mouse mode. The same timer doubles
+    /// as the wake detector — see `probe()`.
+    private func startWatchdog() {
+        guard watchdog == nil else { return }
+        let timer = Timer(timeInterval: probeInterval, repeats: true) { [weak self] _ in
+            self?.probe()
+        }
+        // Common modes, for the same reason the HID source uses them: a probe
+        // that only fires in the default mode stalls for as long as a menu is
+        // open or a slider is held in the tuning app.
+        RunLoop.main.add(timer, forMode: .common)
+        watchdog = timer
+    }
+
+    private func probe() {
+        guard isRunning, !stopped else { return }
+
+        // Timers do not fire while the machine is asleep, so an interval that
+        // took far longer than it should have *is* the wake notification — no
+        // AppKit, no power-source plumbing.
+        let now = Date()
+        let woke = now.timeIntervalSince(lastProbe) > 3 * probeInterval
+        lastProbe = now
+
+        // A wake does not probe, it re-initialises. The read below cannot see
+        // every way this goes wrong: if IOKit stops delivering to our scheduled
+        // source, Input Mode still reads back 3 while no frames arrive at all,
+        // and a driver that reports itself healthy at a dead pad is the failure
+        // this whole section exists to remove. Sleep is the likeliest moment for
+        // that, and it is also the moment a brief re-init costs nothing.
+        if woke, session != nil {
+            log("woke after a gap — reattaching")
+            detach(announce: false)
+            recover()
+            return
+        }
+
+        // A feature read is a synchronous control transfer on the same thread
+        // the frame handler runs on, so never do one mid-gesture: it would land
+        // inside the 6.5 ms frame budget. Frames stop the moment the last
+        // finger lifts, so a fifth of a second of quiet is enough to be clear.
+        if session != nil, TouchDriver.now - motion.at < 0.2 { return }
+
+        guard let session else { recover(); return }
+
+        do {
+            let echo = try session.device.getFeature(
+                reportID: session.inputModeReportID,
+                bodyLength: session.inputModeBodyLength)
+            if echo.body.first == ZSA.inputModeMultitouch {
+                setLink(.live)
+            } else {
+                // Answering, but in mouse mode: a reset that did not
+                // re-enumerate, so the handle is still good and a re-write is
+                // the whole fix. Already rate-limited by the probe interval.
+                reassertMultitouch(
+                    because: "Input Mode read back as "
+                        + (echo.body.first.map(String.init) ?? "nothing"),
+                    force: true)
+            }
+        } catch {
+            // The handle is dead — unplugged, or re-enumerated over sleep.
+            log("lost the pad (\(error)) — rediscovering")
+            detach()
+            recover()
+        }
+    }
+
+    /// Attach again. Quiet about failure: the pad may simply still be
+    /// unplugged, and the next probe will try again.
+    private func recover() {
+        do { try attach(firstTime: false) } catch { setLink(.lost) }
+    }
+
+    /// Let go of the device.
+    ///
+    /// Deliberately does not restore mouse mode: in the case this exists for the
+    /// handle is dead, so the write would fail anyway, and the pad has already
+    /// reset itself — that is how we noticed. What does matter is not leaving
+    /// the *system* mid-gesture, with a button held or momentum still coasting,
+    /// and not carrying a half-finished tap across the gap into the next
+    /// session.
+    ///
+    /// `announce: false` for the wake path, which detaches and reattaches in
+    /// one tick: reporting a disconnection every time the machine wakes would
+    /// be alarming and, if the reattach works, untrue.
+    private func detach(announce: Bool = true) {
+        scrollSynthesizer.cancelMomentum()
+        if !options.dryRun { pointerSynthesizer.releaseAll() }
+        pointerSynthesizer.resync()
+        pointerRecognizer.reset()
+        session?.stop()
+        session = nil
+        tracker = nil
+        previousContactCount = 0
+        motion = Motion()
+        if announce { setLink(.lost) }
+    }
+
+    /// Put the pad back into multitouch after it has reset itself.
+    ///
+    /// Throttled, because the mouse-mode fallback *streams* reports and a
+    /// control transfer per report would be both pointless and slow. Callers
+    /// that are already rate-limited pass `force`.
+    private func reassertMultitouch(because reason: String, force: Bool = false) {
+        guard let session, isRunning, !stopped else { return }
+        let now = TouchDriver.now
+        guard force || now - lastReassert > 1 else { return }
+        lastReassert = now
+        log("\(reason) — re-asserting multitouch")
+        if session.setInputMode(ZSA.inputModeMultitouch,
+                                log: { [weak self] in self?.log($0) }) {
+            setLink(.live)
+        } else {
+            setLink(.mouseMode)
         }
     }
 

@@ -202,12 +202,26 @@ public enum ReportFraming {
 }
 
 public enum HIDDiscovery {
+    /// One manager for the life of the process, rather than one per call.
+    ///
+    /// This used to create and open a manager per enumeration and never close
+    /// it, which was harmless while enumeration happened once at startup. The
+    /// driver's watchdog rediscovers every couple of seconds for as long as the
+    /// pad is unplugged, so that would be a manager leaked per probe — tens of
+    /// thousands over a night with the board unplugged. Matching can be re-set
+    /// on an open manager, so reusing it costs nothing.
+    private static let manager: IOHIDManager = {
+        let m = IOHIDManagerCreate(kCFAllocatorDefault,
+                                   IOOptionBits(kIOHIDOptionsTypeNone))
+        IOHIDManagerOpen(m, IOOptionBits(kIOHIDOptionsTypeNone))
+        return m
+    }()
+
     /// Enumerate HID devices, optionally filtered by vendor/usage.
     public static func devices(vendorID: Int? = nil,
                                usagePage: Int? = nil,
                                usage: Int? = nil) -> [HIDDevice] {
-        let manager = IOHIDManagerCreate(kCFAllocatorDefault,
-                                         IOOptionBits(kIOHIDOptionsTypeNone))
+        let manager = HIDDiscovery.manager
         var criteria: [String: Any] = [:]
         if let vendorID { criteria[kIOHIDVendorIDKey] = vendorID }
         if let usagePage { criteria[kIOHIDPrimaryUsagePageKey] = usagePage }
@@ -218,7 +232,6 @@ public enum HIDDiscovery {
         } else {
             IOHIDManagerSetDeviceMatching(manager, criteria as CFDictionary)
         }
-        IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
 
         guard let set = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else { return [] }
         return set.map(HIDDevice.init).sorted { $0.info.usagePage < $1.info.usagePage }

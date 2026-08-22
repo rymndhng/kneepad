@@ -911,6 +911,20 @@ final class TunerController: NSObject, NSWindowDelegate {
         driver.onForeignReport = { [weak self] reportID in
             self?.show("Device fell back to mouse mode (report \(reportID))", .systemOrange)
         }
+        // The driver reattaches itself now — over sleep, a replug, or the pad
+        // resetting to mouse mode. This is only so the footer says where it is,
+        // instead of reading "Trackpad live" at a pad that is unplugged.
+        driver.onLinkChange = { [weak self] link in
+            switch link {
+            case .live:
+                self?.show("Trackpad live", .systemGreen)
+            case .mouseMode:
+                self?.show("Trackpad reset to mouse mode — retrying", .systemOrange)
+            case .lost:
+                self?.show("Trackpad disconnected — waiting for it",
+                           .secondaryLabelColor)
+            }
+        }
 
         do {
             try driver.start()
@@ -975,7 +989,12 @@ final class TunerController: NSObject, NSWindowDelegate {
     private func startHealthReporting() {
         guard healthTimer == nil else { return }
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self, let health = driver?.health() else { return }
+            // Only while attached: `health` keeps a couple of seconds of
+            // frames, so straight after a disconnect it would still read fine
+            // and paint "Trackpad live" over the footer that just said the pad
+            // is gone.
+            guard let self, driver?.link == .live,
+                  let health = driver?.health() else { return }
 
             // Hold the worst reading for half a minute. The lag being chased
             // happens while this window is behind something else, so a value

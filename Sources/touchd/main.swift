@@ -77,6 +77,10 @@ func printUsage() {
       touchd --stats                report rate and jitter measurements
       touchd --dry-run              recognise but post nothing
 
+    The driver reattaches on its own: it probes the pad every couple of
+    seconds while no finger is down, so sleep, a replug, or the pad resetting
+    itself to mouse mode all recover without restarting the agent.
+
     Needs Input Monitoring (to read the pad) and Accessibility (to post
     events). Ctrl-C restores mouse mode.
     """)
@@ -236,6 +240,26 @@ driver.onReady = {
 
 driver.onForeignReport = { reportID in
     print("⚠️  report \(reportID) — device fell back to mouse mode")
+}
+
+// Only report the round trip, not the arrival: the startup summary above
+// already covers the first attach, and what is worth a line in a LaunchAgent's
+// log is that the pad went away and came back.
+var linkWasBroken = false
+driver.onLinkChange = { link in
+    switch link {
+    case .live:
+        if linkWasBroken {
+            linkWasBroken = false
+            print("✅ pad reattached")
+        }
+    case .mouseMode:
+        linkWasBroken = true
+        print("⚠️  pad is in mouse mode and would not switch back — retrying")
+    case .lost:
+        linkWasBroken = true
+        print("⚠️  pad disconnected — waiting for it to come back")
+    }
 }
 
 // MARK: - Shutdown
