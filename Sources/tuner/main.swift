@@ -513,9 +513,15 @@ final class LiveReadout: NSStackView {
     /// down again. Long enough to look at, short enough not to mislead.
     private let peakHold = 2.0
 
-    /// The instantaneous figures update at 12 Hz rather than 60. Faster is not
-    /// more informative — the digits just blur.
-    private var tick = 0
+    /// The instantaneous figures update at 12 Hz however often they are fed.
+    /// Faster is not more informative — the digits just blur.
+    ///
+    /// Timed rather than counted: this was `tick % 5`, which is 12 Hz only if
+    /// the caller polls at exactly 60, and the panel now polls slower when it
+    /// does not have focus. Same divisor, a sixth of the input, and the digits
+    /// would have crawled at 2 Hz.
+    private let paintInterval = 1.0 / 12
+    private var lastPaint = 0.0
 
     private static func value() -> NSTextField {
         let field = NSTextField(labelWithString: "—")
@@ -565,8 +571,8 @@ final class LiveReadout: NSStackView {
             peakAt = now
         }
 
-        tick += 1
-        guard tick % 5 == 0 else { return }
+        guard now - lastPaint >= paintInterval else { return }
+        lastPaint = now
 
         let set = LiveReadout.set
 
@@ -752,7 +758,7 @@ final class TunerController: NSObject, NSWindowDelegate {
             return scroll
         }
 
-        startMotionPolling()
+        startMotionPolling(hz: activePollHz)
 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
@@ -871,6 +877,7 @@ final class TunerController: NSObject, NSWindowDelegate {
 
         refreshDisplay()
         installReleaseMonitor()
+        installActivationObservers()
         startDriver()
     }
 
@@ -1095,20 +1102,32 @@ final class TunerController: NSObject, NSWindowDelegate {
     // MARK: Live position on the curve
 
     private var motionTimer: Timer?
+    /// The rate `motionTimer` is running at, so a state change that does not
+    /// change the rate leaves the timer alone instead of tearing it down and
+    /// building an identical one.
+    private var pollHz: Double?
 
-    /// Polls the driver's latest motion at display rate.
+    /// Display rate, for when this is the app being looked at.
+    private let activePollHz = 60.0
+    /// And for when it is not. See `wantedPollHz`.
+    private let inactivePollHz = 10.0
+
+    /// Polls the driver's latest motion.
     ///
     /// Polling rather than being pushed: the driver reports ~154 times a second
     /// from inside its frame handler, which has a 6.5 ms budget and must not be
-    /// made to repaint a curve. Sixty reads a second is all a plot can show.
-    private func startMotionPolling() {
+    /// made to repaint a curve. Sixty reads a second is all a plot can show,
+    /// and fewer will do when nobody is looking straight at it.
+    private func startMotionPolling(hz: Double) {
+        motionTimer?.invalidate()
         // Common modes, or the plot freezes for the whole of a slider drag —
         // which is exactly when it is being watched.
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1 / hz, repeats: true) { [weak self] _ in
             self?.pollMotion()
         }
         RunLoop.main.add(timer, forMode: .common)
         motionTimer = timer
+        pollHz = hz
     }
 
     private func pollMotion() {
@@ -1129,7 +1148,17 @@ final class TunerController: NSObject, NSWindowDelegate {
                        accent: curve.indicatorColor)
         if touching {
             curve.trail.append(motion.speed)
-            if curve.trail.count > 90 { curve.trail.removeFirst() }   // ~1.5s
+            // A second and a half of history, however fast we are sampling.
+            // This used to be a flat 90 samples, which was 1.5s only because
+            // the poll was always 60 Hz; at the background rate the same count
+            // would have stretched the trail to nine seconds and quietly
+            // changed what the plot means. Trimmed by the whole overshoot so a
+            // rate change converges on the next tick rather than over the next
+            // hundred.
+            let cap = max(2, Int(1.5 * (pollHz ?? activePollHz)))
+            if curve.trail.count > cap {
+                curve.trail.removeFirst(curve.trail.count - cap)
+            }
         } else if !curve.trail.isEmpty {
             curve.trail.removeFirst()
             curve.needsDisplay = true
@@ -1148,30 +1177,63 @@ final class TunerController: NSObject, NSWindowDelegate {
 
     // MARK: Drawing only when there is something to see
 
-    /// True when the plot is actually on screen: not minimised, not hidden,
-    /// not completely covered by another window.
-    private var plotIsVisible: Bool {
-        !window.isMiniaturized && window.occlusionState.contains(.visible)
+    /// How fast the plot is worth drawing, or nil for not at all.
+    ///
+    /// Three tiers, because there are three genuinely different situations:
+    ///
+    /// - **Nobody can see it** — minimised, or a window completely covered
+    ///   while this app is still frontmost. Nothing to draw, so draw nothing.
+    /// - **Visible, but another app has focus.** The panel sitting in plain
+    ///   sight beside the app you are working in: still readable, so the plot
+    ///   keeps running, but at a sixth of the rate. This is the case the gate
+    ///   used to miss entirely — AppKit only drops `.visible` when a window is
+    ///   minimised or *completely* covered, so an unfocused-but-visible panel
+    ///   read as fully visible and kept repainting the whole curve, its axes,
+    ///   its labels and the trail sixty times a second. And that is the common
+    ///   case, because moving the pad is exactly what you do while working
+    ///   somewhere else: the panel did its most expensive drawing precisely
+    ///   when nobody was looking straight at it.
+    /// - **Focused and visible.** Display rate.
+    ///
+    /// Focus is an *application* notification, not a window one — see
+    /// `installActivationObservers`. No amount of `NSWindowDelegate` callbacks
+    /// would have caught it.
+    ///
+    /// Only ever display work. The driver keeps running flat out in every tier,
+    /// because the point of the app is that the trackpad works while it is open.
+    private var wantedPollHz: Double? {
+        guard !window.isMiniaturized,
+              window.occlusionState.contains(.visible) else { return nil }
+        return NSApp.isActive ? activePollHz : inactivePollHz
     }
 
-    /// Stop polling when nobody can see the result.
-    ///
-    /// This is display work only — the driver keeps running, because the point
-    /// of the app is that the trackpad works while it is open. But the poll
-    /// runs at 60 Hz and repaints a curve, a trail and four readouts, and none
-    /// of that is worth a single cycle behind another window or in the Dock.
     private func updatePolling() {
-        let wanted = plotIsVisible
-        guard wanted != (motionTimer != nil) else { return }
-        if wanted {
-            startMotionPolling()
+        let wanted = wantedPollHz
+        guard wanted != pollHz else { return }
+        if let wanted {
+            startMotionPolling(hz: wanted)
         } else {
             motionTimer?.invalidate()
             motionTimer = nil
+            pollHz = nil
             // Come back showing the present rather than a frozen gesture from
-            // whenever the window was last covered.
+            // whenever the window was last covered. Only needed here: the
+            // throttled tiers keep sampling, so they are never stale.
             curve.liveSpeed = nil
             curve.trail.removeAll()
+        }
+    }
+
+    /// Losing and regaining focus is the transition that matters, and it is an
+    /// *application* notification — `NSWindowDelegate` has nothing for it, so
+    /// no amount of window callbacks would have caught this.
+    private func installActivationObservers() {
+        for name in [NSApplication.didBecomeActiveNotification,
+                     NSApplication.didResignActiveNotification] {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main) { [weak self] _ in
+                    self?.updatePolling()
+                }
         }
     }
 
