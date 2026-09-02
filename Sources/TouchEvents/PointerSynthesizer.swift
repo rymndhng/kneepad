@@ -89,6 +89,10 @@ public final class PointerSynthesizer {
 
     private var buttonState: [MouseButton: Bool] = [:]
 
+    /// Which mouse-down each held button belongs to, so a drag can say which
+    /// press it is part of. See `move`.
+    private let buttons = ButtonWatch()
+
     /// Our own cursor position, kept in full precision.
     ///
     /// Reading the system cursor back every frame both costs a round trip and
@@ -121,6 +125,17 @@ public final class PointerSynthesizer {
             setButton(button, down: false)
         }
     }
+
+    /// Start and stop watching the session's mouse-downs.
+    ///
+    /// Tied to the driver's lifecycle rather than to this object's: it is a
+    /// system-wide event tap, and one has no business outliving the driver
+    /// that needed it. A false return means the tap could not be created —
+    /// drags still post as drags, they just go back to being stamped 0.
+    @discardableResult
+    public func startWatchingButtons() -> Bool { buttons.start() }
+
+    public func stopWatchingButtons() { buttons.stop() }
 
     /// Forget our cursor belief, e.g. when all fingers lift. The next movement
     /// re-reads the true position and display layout.
@@ -203,6 +218,20 @@ public final class PointerSynthesizer {
         guard let event = CGEvent(mouseEventSource: nil, mouseType: type,
                                   mouseCursorPosition: target,
                                   mouseButton: cgButton(held ?? .left)) else { return }
+        // A drag also has to say which press it belongs to. AppKit's tracking
+        // loops pair the two by event number, and drop a drag whose number is
+        // not the one the mouseDown carried — measured: a window follows a
+        // synthetic drag when the numbers match and does not move at all when
+        // they differ by one. Ours were all 0 while the press that opened the
+        // drag was numbered by the window server, so every drag driven by a
+        // button held on another device was thrown away. Same shape of bug as
+        // posting `mouseMoved` instead of `…MouseDragged`, one layer down, and
+        // with the same signature: the cursor moves, the window does not, and
+        // apps that track buttons themselves are unaffected.
+        if let held {
+            event.setIntegerValueField(.mouseEventNumber,
+                                       value: buttons.number(for: held))
+        }
         // Apps that read relative motion need these, not just the position.
         event.setIntegerValueField(.mouseEventDeltaX, value: Int64(dx))
         event.setIntegerValueField(.mouseEventDeltaY, value: Int64(dy))

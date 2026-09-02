@@ -211,6 +211,13 @@ public final class TouchDriver {
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
             reason: "driving the trackpad")
 
+        // After the pad is attached and streaming, so a start that throws on
+        // the way here does not leave a session-wide event tap behind.
+        if !options.dryRun, !pointerSynthesizer.startWatchingButtons() {
+            log("could not watch mouse buttons — dragging with a button held "
+                + "on another device may not register")
+        }
+
         isRunning = true
         startWatchdog()
     }
@@ -296,6 +303,7 @@ public final class TouchDriver {
         scrollSynthesizer.cancelMomentum()
         // Never leave a button stuck down for the rest of the login session.
         if !options.dryRun { pointerSynthesizer.releaseAll() }
+        pointerSynthesizer.stopWatchingButtons()
         session?.restoreMouseMode(log: { [weak self] in self?.log($0) })
         session?.stop()
         motion = Motion()

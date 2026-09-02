@@ -239,6 +239,30 @@ everything mouse mode did, so the pad stays usable while it runs.
   AppKit tracking loop; that split — same gesture, some apps fine — is the
   signature to recognise next time. `CGEventSourceButtonState` costs ~0.13 µs,
   so this is affordable per frame, unlike reading the cursor position back.
+- **A drag also has to carry the event number of the press that opened it.**
+  The same bug one layer down, with the same signature, and it came back on
+  macOS 27: the cursor moved, the window did not, and apps that track buttons
+  themselves were unaffected. AppKit's tracking loops pair a drag with its
+  mouseDown by `NSEvent.eventNumber` and drop a drag whose number does not
+  match — measured: a window follows a synthetic drag when the numbers agree
+  and does not move by a single pixel when they differ by one. Ours were all 0
+  while the real press was numbered by the window server (209, 210, 211 for
+  consecutive presses), so every drag driven by a button held on the keyboard
+  was thrown away, while the pad's own button — press and drag both posted by
+  us, both numbered 0 — kept working.
+
+  The number cannot be computed: it is not the `CGEventSourceCounterForEventType`
+  count (that read 446 while live presses were numbered 209–211), and a null
+  event reads the field back as 0. The only way to learn the number of a press
+  we did not post is to watch it go past, which is what
+  `TouchEvents/ButtonWatch.swift` is for — a listen-only tap on mouse *downs*
+  only, because a listen-only tap still holds up delivery of everything it asks
+  for and the driver has no business standing in the path of the whole session's
+  mouse movement. It reads our own presses back the same way rather than
+  assuming they come out as zero, since the number a posted event ends up
+  carrying is the window server's to decide. Learning it a frame late is
+  harmless: a drag whose first five events are mismatched still moves the
+  window.
 - Saturating acceleration curve — raw deltas feel awful.
 - `releaseAll()` on shutdown so a crash mid-drag can't leave a button stuck
   down for the rest of the login session.
