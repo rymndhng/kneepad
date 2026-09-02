@@ -112,7 +112,7 @@ if let a = value("--activation") { recognizer.activationDistance = a }
 let synthesizer = ScrollSynthesizer(configuration: config)
 
 func restoreAndExit(_ code: Int32) -> Never {
-    synthesizer.cancelMomentum()
+    synthesizer.cancelMomentum(fingersLanded: false)
     print("\nRestoring mouse mode…")
     session.restoreMouseMode(log: log)
     session.stop()
@@ -152,7 +152,12 @@ session.onFrame = { frame, _ in
     // the gesture that just ended would otherwise cancel the momentum it had
     // only just started — the faster the release, the worse it looked.
     if previousContactCount == 0 && !frame.contacts.isEmpty {
-        synthesizer.cancelMomentum()
+        synthesizer.cancelMomentum(fingersLanded: true)
+    }
+    // Fingers that landed on a glide and left without scrolling opened a
+    // sequence that nothing else will close.
+    if frame.contacts.isEmpty && previousContactCount != 0 {
+        synthesizer.fingersLifted()
     }
     previousContactCount = frame.contacts.count
 

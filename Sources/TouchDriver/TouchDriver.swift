@@ -300,7 +300,10 @@ public final class TouchDriver {
         isRunning = false
         watchdog?.invalidate()
         watchdog = nil
-        scrollSynthesizer.cancelMomentum()
+        // Not `fingersLanded`: a driver going away must not leave a mayBegin
+        // open behind it, latching the next scroll to whatever the cursor
+        // happened to be over.
+        scrollSynthesizer.cancelMomentum(fingersLanded: false)
         // Never leave a button stuck down for the rest of the login session.
         if !options.dryRun { pointerSynthesizer.releaseAll() }
         pointerSynthesizer.stopWatchingButtons()
@@ -436,7 +439,7 @@ public final class TouchDriver {
     /// one tick: reporting a disconnection every time the machine wakes would
     /// be alarming and, if the reattach works, untrue.
     private func detach(announce: Bool = true) {
-        scrollSynthesizer.cancelMomentum()
+        scrollSynthesizer.cancelMomentum(fingersLanded: false)
         if !options.dryRun { pointerSynthesizer.releaseAll() }
         pointerSynthesizer.resync()
         pointerRecognizer.reset()
@@ -566,13 +569,17 @@ public final class TouchDriver {
         // two fingers never lift on the same frame, so "any contact present"
         // would let the straggler cancel the momentum it just started.
         if previousContactCount == 0 && !frame.contacts.isEmpty {
-            scrollSynthesizer.cancelMomentum()
+            scrollSynthesizer.cancelMomentum(fingersLanded: true)
         }
         // With no fingers down, drop our cursor belief so the next touch picks
         // up wherever the pointer actually is — something else may have moved
         // it in the meantime.
         if frame.contacts.isEmpty && previousContactCount != 0 {
             pointerSynthesizer.resync()
+            // And close a mayBegin that never became a scroll: stopping a glide
+            // with two fingers and lifting them again is exactly that, and an
+            // open sequence holds on to the next scroll.
+            scrollSynthesizer.fingersLifted()
         }
         previousContactCount = frame.contacts.count
 

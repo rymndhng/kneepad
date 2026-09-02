@@ -270,6 +270,11 @@ func runScrollDirectionTests() {
 // Momentum phases. An app that has seen momentum begin animates on its own
 // until it sees momentum end, so every begin must be matched — including when
 // the user interrupts a glide by putting fingers back down.
+//
+// And every mayBegin must be closed. It opens a phase sequence that the window
+// under the cursor takes hold of, so one left dangling steals the next scroll
+// from whatever the cursor has moved to since — which is why the rules about
+// who may send one, and who must close it, are pinned here.
 
 func runMomentumPhaseTests() {
     TestRunner.suite("Scroll momentum phases") {
@@ -309,7 +314,7 @@ func runMomentumPhaseTests() {
         TestRunner.test("interrupting a glide ends the momentum sequence") {
             let (synth, log) = recorder()
             synth.handle(flick())
-            synth.cancelMomentum()
+            synth.cancelMomentum(fingersLanded: true)
             check(log.momentum.contains(.end),
                   "expected a momentum end, got \(log.momentum)")
         }
@@ -321,17 +326,65 @@ func runMomentumPhaseTests() {
         TestRunner.test("interrupting a glide also says fingers have landed") {
             let (synth, log) = recorder()
             synth.handle(flick())
-            synth.cancelMomentum()
+            synth.cancelMomentum(fingersLanded: true)
             check(log.scroll.contains(.mayBegin),
                   "expected a mayBegin, got \(log.scroll)")
+        }
+
+        // The other half of that, and the reported bug: a glide that simply
+        // ran out has no hand on the pad to speak for. Claiming one opened a
+        // sequence on whatever the cursor was over, which then took the next
+        // scroll — measured, with the second window receiving nothing at all.
+        TestRunner.test("a glide that runs out does not claim fingers landed") {
+            let (synth, log) = recorder()
+            synth.handle(flick())
+            synth.cancelMomentum(fingersLanded: false)
+            check(log.momentum.contains(.end),
+                  "the glide must still be ended, got \(log.momentum)")
+            check(!log.scroll.contains(.mayBegin),
+                  "nothing landed on the pad, so nothing may say so: \(log.scroll)")
+        }
+
+        // Landing two fingers to stop a glide and lifting them again is the
+        // ordinary way to stop one. It opens a sequence and never scrolls.
+        TestRunner.test("a mayBegin that never scrolls is cancelled on liftoff") {
+            let (synth, log) = recorder()
+            synth.handle(flick())
+            synth.cancelMomentum(fingersLanded: true)
+            synth.fingersLifted()
+            check(log.scroll.contains(.cancelled),
+                  "expected the sequence to be closed, got \(log.scroll)")
+        }
+
+        TestRunner.test("a mayBegin that becomes a scroll is not cancelled too") {
+            let (synth, log) = recorder()
+            synth.handle(flick())
+            synth.cancelMomentum(fingersLanded: true)
+            synth.handle(ScrollUpdate(phase: .began, delta: Point(x: 0, y: 1),
+                                      velocity: Point(x: 0, y: 0)))
+            synth.handle(ScrollUpdate(phase: .ended, delta: Point(x: 0, y: 0),
+                                      velocity: Point(x: 0, y: 0)))
+            synth.fingersLifted()
+            check(!log.scroll.contains(.cancelled),
+                  "began closed the sequence already, got \(log.scroll)")
+        }
+
+        // Called on every liftoff, so it has to be free when there is nothing
+        // outstanding — a stray cancelled would end a scroll of its own.
+        TestRunner.test("liftoff with no mayBegin outstanding is silent") {
+            let (synth, log) = recorder()
+            synth.fingersLifted()
+            synth.fingersLifted()
+            expectEqual(log.scroll.count, 0, "nothing was open to close")
+            expectEqual(log.momentum.count, 0, "and no momentum to report")
         }
 
         TestRunner.test("every begin is matched by exactly one end") {
             let (synth, log) = recorder()
             synth.handle(flick())
-            synth.cancelMomentum()
-            synth.cancelMomentum()      // idle cancels must stay silent
-            synth.cancelMomentum()
+            synth.cancelMomentum(fingersLanded: true)
+            synth.cancelMomentum(fingersLanded: true)   // idle cancels stay silent
+            synth.cancelMomentum(fingersLanded: true)
             let begins = log.momentum.filter { $0 == .begin }.count
             let ends = log.momentum.filter { $0 == .end }.count
             expectEqual(begins, 1, "one flick, one begin")
@@ -340,7 +393,7 @@ func runMomentumPhaseTests() {
 
         TestRunner.test("cancelling when nothing is coasting posts nothing") {
             let (synth, log) = recorder()
-            synth.cancelMomentum()
+            synth.cancelMomentum(fingersLanded: true)
             expectEqual(log.momentum.count, 0,
                         "a new touch with no glide in flight must be silent")
         }
@@ -351,7 +404,7 @@ func runMomentumPhaseTests() {
                                       velocity: Point(x: 0, y: 0.2)))
             check(!log.momentum.contains(.begin), "a deliberate stop must not coast")
             let before = log.momentum.count
-            synth.cancelMomentum()
+            synth.cancelMomentum(fingersLanded: true)
             expectEqual(log.momentum.count, before,
                         "cancelling afterwards must not invent a sequence")
         }

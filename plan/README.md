@@ -365,6 +365,33 @@ Two bugs found by using it, both only visible on a fast release:
   before the lift. The first fix (median of smoothed velocity) overcorrected and
   made a deliberate stop fling — caught by a test, not by hand.
 
+A third, found later, from "two-finger scroll doesn't consistently scroll the
+thing under the cursor":
+
+- **A dangling `mayBegin` latches the scroll to the wrong window.** mayBegin
+  opens a phase sequence, and the window under the cursor takes hold of it. With
+  no `began` or `cancelled` to close it, that hold survives: the *next* scroll
+  is delivered there however far the cursor has moved in between. Measured with
+  two windows and a counting `scrollWheel(with:)` — after a glide decayed over
+  one, a full began → changed → ended aimed at the other went **entirely** to
+  the first, which received 11 events while the hovered window received none.
+  The stale hold even leaked across processes: a run that left one open stole
+  the first scroll of the next run.
+
+  We sent mayBegin from two places that have no hand on the pad to speak for.
+  Stopping momentum did it unconditionally, so every glide that simply ran out
+  ended by claiming fingers had landed; so did shutdown. It is now a
+  `cancelMomentum(fingersLanded:)` argument, and only a real touchdown passes
+  true. The other half is the close: landing two fingers to stop a glide and
+  lifting them again — the ordinary way to stop one — opens a sequence and
+  never scrolls, so `fingersLifted()` sends `cancelled` when a mayBegin is
+  outstanding at liftoff. Without it the same measurement gave 0 events to the
+  hovered window and 14 to the stale one.
+
+  Worth recognising by shape: like the drag event number, the events were all
+  posted, all well-formed, and delivered to the wrong place — nothing errors,
+  and it looks like an app bug rather than ours.
+
 ### Stage 5 — Pinch / rotate / swipe 🔬 (recon tool built, not yet implemented)
 macOS has **no public API** to synthesize these. The values live in
 undocumented `CGEvent` fields, and guessing the field numbers produces events

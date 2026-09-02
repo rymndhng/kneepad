@@ -75,6 +75,9 @@ public final class ScrollSynthesizer {
     /// Sub-pixel remainder, so slow scrolling doesn't get truncated to nothing.
     private var residual = Point(x: 0, y: 0)
 
+    /// True between a `mayBegin` and whatever closes it. See `fingersLifted`.
+    private var awaitingBegan = false
+
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
     }
@@ -94,7 +97,7 @@ public final class ScrollSynthesizer {
     public func handle(_ update: ScrollUpdate) {
         switch update.phase {
         case .began:
-            cancelMomentum()
+            cancelMomentum(fingersLanded: true)
             residual = Point(x: 0, y: 0)
             post(delta: pixels(update.delta), phase: .began, momentum: .none)
         case .changed:
@@ -107,31 +110,53 @@ public final class ScrollSynthesizer {
         }
     }
 
-    /// Stop any in-flight momentum — call when a new touch lands.
-    /// Stops coasting, and tells the receiving app that it has stopped.
+    /// Stop any in-flight momentum, and tell the receiving app it has stopped.
     ///
     /// The end event is the part that matters. An app that has seen momentum
     /// begin runs its own animation until it sees momentum end — Maps and any
     /// AppKit scroll view both do — so simply dropping our timer left the view
     /// gliding on with nothing driving it. Putting two fingers back down
     /// looked like it did nothing.
-    public func cancelMomentum() {
+    ///
+    /// `fingersLanded` says *why* the glide stopped, and only a hand on the pad
+    /// may claim it. Fingers landing also get mayBegin: ending the momentum
+    /// phase is the correct protocol and satisfies AppKit scroll views, but
+    /// Maps kept gliding anyway, and mayBegin is what a real trackpad sends
+    /// when fingers land — the signal an app watches to abandon inertia it is
+    /// animating itself.
+    ///
+    /// A glide that simply ran out, and a driver shutting down, must NOT send
+    /// it. mayBegin opens a phase sequence and the window under the cursor
+    /// takes hold of it; with no `began` or `cancelled` to close it, that hold
+    /// survives, and the *next* scroll is delivered there however far the
+    /// cursor has moved in between. Measured with two windows: after a glide
+    /// decayed over one of them, a full scroll aimed at the other went
+    /// entirely to the first, which is the whole of "scrolling doesn't
+    /// consistently scroll what is under the cursor".
+    public func cancelMomentum(fingersLanded: Bool) {
         let wasCoasting = momentumTimer != nil
         momentumTimer?.cancel()
         momentumTimer = nil
         momentumVelocity = Point(x: 0, y: 0)
         guard wasCoasting else { return }
 
-        // Two signals, because one was not enough. Ending the momentum phase is
-        // the correct protocol and satisfies AppKit scroll views. Maps kept
-        // gliding anyway, so this also sends what a real trackpad sends when
-        // fingers land — mayBegin — which is the signal an app watches to
-        // abandon inertia it is animating itself.
-        //
-        // Still a hypothesis: see `scroll-probe`, which prints what the
-        // built-in trackpad actually emits at that moment.
         post(delta: Point(x: 0, y: 0), phase: nil, momentum: .end)
+        guard fingersLanded else { return }
         post(delta: Point(x: 0, y: 0), phase: .mayBegin, momentum: .none)
+    }
+
+    /// Every finger has left the pad.
+    ///
+    /// Closes a mayBegin that never became a scroll, which is not an edge case:
+    /// dropping two fingers on the pad and lifting them again is how you stop a
+    /// glide, and it is exactly the path that opens a sequence and never
+    /// finishes it. Cancelled is what a real trackpad sends there.
+    ///
+    /// Silent unless a mayBegin is actually outstanding, so it costs nothing to
+    /// call on every liftoff.
+    public func fingersLifted() {
+        guard awaitingBegan else { return }
+        post(delta: Point(x: 0, y: 0), phase: .cancelled, momentum: .none)
     }
 
     // MARK: Conversion
@@ -171,8 +196,8 @@ public final class ScrollSynthesizer {
 
         if momentumVelocity.magnitude < momentumFloor {
             // cancelMomentum posts the end event; posting one here too would
-            // send it twice.
-            cancelMomentum()
+            // send it twice. No fingers are involved — the glide ran out.
+            cancelMomentum(fingersLanded: false)
             return
         }
         post(delta: Point(x: momentumVelocity.x * dt, y: momentumVelocity.y * dt),
@@ -266,6 +291,14 @@ public final class ScrollSynthesizer {
     }
 
     private func post(delta: Point, phase: Phase?, momentum: MomentumPhase) {
+        // Kept here rather than at the call sites so the flag cannot drift from
+        // the events actually sent.
+        switch phase {
+        case .mayBegin: awaitingBegan = true
+        case .began, .cancelled, .ended: awaitingBegan = false
+        case .changed, nil: break
+        }
+
         onPost?(delta, phase, momentum)
         guard postsEvents else { return }
 
