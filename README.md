@@ -84,13 +84,15 @@ If you move the app to `/Applications`, give the permissions to that copy. macOS
 
 ## If the pointer stops working
 
-If the app stops and the pad does not move the pointer, run this command from the repository folder:
+If the app stops and the pad does not move the pointer, disconnect the keyboard and connect it again. The pad starts again in its normal mouse mode.
+
+If you built from source, you can run this command from the repository folder instead:
 
 ```
 swift run hid-stream --restore
 ```
 
-The command puts the pad back into mouse mode.
+The command puts the pad back into mouse mode without disconnecting the keyboard.
 
 ## How it works
 
