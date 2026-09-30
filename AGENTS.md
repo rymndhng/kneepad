@@ -8,4 +8,4 @@ The app is the product: `scripts/build-app.sh` builds `build/Kneepad.app`, and t
 
 ## Naming
 
-The public name is kneepad (`Kneepad.app`, bundle ID `dev.rymndhng.kneepad.app`). Older names stay on purpose where changing them would lose user state: the settings path `Application Support/teach-touch/`, the log subsystem `dev.rymndhng.teach-touch`, the LaunchAgent label, and the signing identity names.
+The public name is kneepad (`Kneepad.app`, bundle ID `dev.rymndhng.kneepad.app`). Settings live in `Application Support/kneepad/`. Older names stay on purpose where changing them would lose user state: the log subsystem `dev.rymndhng.teach-touch`, the LaunchAgent label, and the signing identity names.

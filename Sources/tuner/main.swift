@@ -13,7 +13,7 @@ import os
 //
 // So the loop is now: open the app, move a slider, move your finger, feel the
 // difference. Settings still go to
-// ~/Library/Application Support/teach-touch/tuning.json, so a headless
+// ~/Library/Application Support/kneepad/tuning.json, so a headless
 // `touchd` LaunchAgent picks up the same values — but they are applied to the
 // in-process driver directly, without waiting on a file watcher.
 //

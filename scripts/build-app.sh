@@ -104,7 +104,7 @@ TCC is per-binary, so a grant given to your terminal for `swift run` does not
 carry over, and neither does one given to a copy in build/ once you move it to
 /Applications. Grant them to the copy you actually use.
 
-Settings are written to ~/Library/Application Support/teach-touch/tuning.json,
+Settings are written to ~/Library/Application Support/kneepad/tuning.json,
 so a headless `touchd` LaunchAgent picks up the same values. Don't run both at
 once — the app detects a running LaunchAgent and leaves the pad to it.
 

@@ -51,7 +51,7 @@ public struct Tuning: Codable, Equatable {
     public static var defaultURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
                                             in: .userDomainMask)[0]
-        return base.appendingPathComponent("teach-touch/tuning.json")
+        return base.appendingPathComponent("kneepad/tuning.json")
     }
 
     public static func load(from url: URL = defaultURL) -> Tuning? {

@@ -22,7 +22,7 @@ The knee is the finger speed where the curve changes from the constant zone to t
 
 Below the knee, the pointer moves the same distance for each millimeter of finger travel, at any speed. This zone is for aiming. Your hand learns one distance, and the pointer does not jump when you speed up a little.
 
-Above the knee, speed starts to count. The faster you move, the further each millimeter takes the pointer. This zone is for moving across the screen. The curve climbs gradually and stops at a ceiling.
+Above the knee, the faster you move, the further each millimeter takes the pointer. This zone is for moving across the screen. The curve climbs gradually and stops at a ceiling.
 
 ## Tuning your knee
 
@@ -48,7 +48,7 @@ To put the knee where it fits your hands:
 
 With the defaults, the knee is at about 149 mm/s, and the curve reaches the ceiling at about 920 mm/s.
 
-The app saves your values in `~/Library/Application Support/teach-touch/tuning.json`.
+The app saves your values in `~/Library/Application Support/kneepad/tuning.json`.
 
 ## Requirements
 
