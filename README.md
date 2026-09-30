@@ -4,15 +4,15 @@ An unofficial userland driver for the ZSA Navigator trackpad on macOS. It is bui
 
 ## Why
 
-I made kneepad for to solve this problem: How can I make the pointer feel like an extension of my mind?
+I made kneepad to solve this problem: How can I make the pointer feel like an extension of my mind?
 
-My point of reference is the Apple's trackpad. The hardware is excellent, and the out of box software tuning is great. The combination of the two creates the "extension of my mind experience".
+My point of reference is Apple's trackpad. The hardware is excellent, and the out of box software tuning is great. The combination of the two creates the "extension of my mind experience".
 
 The ZSA Navigator hardware is excellent. It's accurate, the surface feels good. But, the software out there is lacking. I've tested ZSA Navigator Companion App, SteerMouse, MacOS vanilla mouse settings. All of these had the same issue: At every combination of pointer speed/acceleration, the pointer was too twitchy at slow speeds or too slow at high speeds. No single value gave me both.
 
 I wanted two behaviors: a constant, predictable speed when I move slow, and acceleration when I move fast. The speed curve looks like a "knee cap" or "hockey stick".
 
-The value prosition of Kneecap is to let me create this acceleration profile. The shape of the curve is personal preference. The defaults are tuned for me, and you can tune it yourself.
+The value proposition of kneepad is to let me create this acceleration profile. The shape of the curve is personal preference. The defaults are tuned for me, and you can tune it yourself.
 
 ## The knee
 
@@ -23,6 +23,8 @@ Below the knee, the pointer moves the same distance for each millimeter of finge
 Above the knee, the speed changes. The faster you move, the further each millimeter takes the pointer. This zone is for moving across the screen. The curve climbs gradually and stops at a ceiling.
 
 The app shows the curve as you tune it. The shaded area is the constant zone, and the dotted line marks the knee. When you move a slider, the curve and the pointer change at the same time, so you can feel each change as you make it.
+
+<!-- VIDEO: on github.com, edit this file and drag docs/demo.mp4 onto this line. GitHub replaces it with a user-attachments URL that plays inline. -->
 
 ![The kneepad tuning window. Sliders on the left, and on the right a plot of pointer speed against finger speed that is flat up to the knee at 149 mm/s and then rises.](docs/tuner.png)
 
