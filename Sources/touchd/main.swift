@@ -17,7 +17,7 @@ func printUsage() {
     The tuning app runs this same driver for as long as its window is open, so
     for interactive use you usually want the app instead:
 
-      ./scripts/build-app.sh && open 'build/Teach Touch.app'
+      ./scripts/build-app.sh && open 'build/Kneepad.app'
 
     This command is for running it headless, as a LaunchAgent.
 

@@ -3,7 +3,7 @@ import TouchDriver
 import TouchEvents
 import os
 
-// Teach Touch — the trackpad driver and its tuning panel, in one app.
+// Kneepad — the trackpad driver and its tuning panel, in one app.
 //
 // The driver runs for as long as this app is open: launching it makes the pad
 // work, quitting it puts the pad back in mouse mode. Shipping the panel apart
@@ -631,7 +631,7 @@ final class TunerController: NSObject, NSWindowDelegate {
         window.minSize = NSSize(width: 720, height: 420)
         super.init()
 
-        window.title = "teach-touch tuning"
+        window.title = "kneepad tuning"
         // Set by scripts/build-app.sh; absent under `swift run`, where the
         // binary is fresh by definition.
         if let stamp = Bundle.main.object(forInfoDictionaryKey: "TTBuildDate") as? String,
@@ -1292,7 +1292,7 @@ private extension NSButton {
 /// than it sounds for this app in particular: quitting is how the trackpad is
 /// handed back to mouse mode.
 func makeMainMenu() -> NSMenu {
-    let name = "Teach Touch"
+    let name = "Kneepad"
     let mainMenu = NSMenu()
 
     let appItem = NSMenuItem()

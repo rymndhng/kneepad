@@ -1,7 +1,7 @@
 #!/bin/bash
 # Install touchd as a LaunchAgent so the trackpad works without any app open.
 #
-# This is the headless option. Teach Touch.app drives the pad itself while it
+# This is the headless option. Kneepad.app drives the pad itself while it
 # is open, so you want one or the other: whichever starts first takes the
 # driver lock, and the other steps aside — the app keeps tuning through the
 # file, and touchd says who has it and exits.

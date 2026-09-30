@@ -16,7 +16,7 @@
 # Sign with a certificate instead. The requirement then names the certificate,
 # which does not change when the code does:
 #
-#     designated => identifier "dev.rymndhng.teach-touch.app"
+#     designated => identifier "dev.rymndhng.kneepad.app"
 #                   and certificate leaf = H"ebeb57f59ac8…"
 #
 # The certificate is self-signed and lives in its own keychain. codesign does
@@ -83,8 +83,8 @@ Done. scripts/build-app.sh will pick this up automatically.
 ONE LAST RE-GRANT. The app's identity changes once more as it moves off ad-hoc
 signing, so the existing permissions are stale. Clear them and grant once more:
 
-  tccutil reset Accessibility dev.rymndhng.teach-touch.app
-  tccutil reset ListenEvent dev.rymndhng.teach-touch.app
+  tccutil reset Accessibility dev.rymndhng.kneepad.app
+  tccutil reset ListenEvent dev.rymndhng.kneepad.app
 
 Then rebuild, open the app, and approve both prompts. That is the last time —
 rebuilds keep the grants from here on.

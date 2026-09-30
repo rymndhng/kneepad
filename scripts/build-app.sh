@@ -14,7 +14,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP="build/Teach Touch.app"
+APP="build/Kneepad.app"
 VERSION="1.0"
 # Stamped into the bundle so the window title and About panel say which build
 # is running — rebuilds are frequent and otherwise indistinguishable.
@@ -41,9 +41,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>            <string>tuner</string>
-    <key>CFBundleIdentifier</key>            <string>dev.rymndhng.teach-touch.app</string>
-    <key>CFBundleName</key>                  <string>Teach Touch</string>
-    <key>CFBundleDisplayName</key>           <string>Teach Touch</string>
+    <key>CFBundleIdentifier</key>            <string>dev.rymndhng.kneepad.app</string>
+    <key>CFBundleName</key>                  <string>Kneepad</string>
+    <key>CFBundleDisplayName</key>           <string>Kneepad</string>
     <key>CFBundlePackageType</key>           <string>APPL</string>
     <key>CFBundleShortVersionString</key>    <string>${VERSION}</string>
     <key>CFBundleVersion</key>               <string>${BUILD_NUMBER}</string>
@@ -54,7 +54,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <!-- Shown in the Input Monitoring prompt. The app reads the trackpad
          directly over HID; without this grant the device will not open. -->
     <key>NSInputMonitoringUsageDescription</key>
-    <string>Teach Touch reads your ZSA trackpad directly to turn its raw touch reports into cursor movement, clicks and scrolling.</string>
+    <string>Kneepad reads your ZSA trackpad directly to turn its raw touch reports into cursor movement, clicks and scrolling.</string>
 </dict>
 </plist>
 PLIST
