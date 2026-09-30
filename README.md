@@ -65,7 +65,7 @@ The pad works only while the app is open. When you quit the app, the pad goes ba
 
 The download is not notarized by Apple, so macOS blocks it the first time you open it. You allow it one time in System Settings.
 
-1. Download the `.zip` file from the [latest release](https://github.com/rymndhng/kneepad/releases/latest).
+1. Download the `.zip` file from the [Releases page](https://github.com/rymndhng/kneepad/releases).
 2. Double-click the `.zip` file to unzip it. Move `Kneepad.app` to `/Applications`.
 3. Open Kneepad. macOS shows a message that it cannot verify the app. Click Done.
 4. Open System Settings > Privacy & Security. Scroll down to Security. Next to the message that Kneepad was blocked, click Open Anyway. Then enter your password and click Open Anyway again.
