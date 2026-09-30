@@ -18,31 +18,37 @@ The value proposition of kneepad is to let me create this acceleration profile. 
 
 The knee is the finger speed where the curve changes from the constant zone to the acceleration zone.
 
+<!-- VIDEO: on github.com, edit this file and drag docs/demo.mp4 onto this line. GitHub replaces it with a user-attachments URL that plays inline. -->
+
 Below the knee, the pointer moves the same distance for each millimeter of finger travel, at any speed. This zone is for aiming. Your hand learns one distance, and the pointer does not jump when you speed up a little.
 
-Above the knee, the speed changes. The faster you move, the further each millimeter takes the pointer. This zone is for moving across the screen. The curve climbs gradually and stops at a ceiling.
+Above the knee, speed starts to count. The faster you move, the further each millimeter takes the pointer. This zone is for moving across the screen. The curve climbs gradually and stops at a ceiling.
 
-The app shows the curve as you tune it. The shaded area is the constant zone, and the dotted line marks the knee. When you move a slider, the curve and the pointer change at the same time, so you can feel each change as you make it.
-
-<!-- VIDEO: on github.com, edit this file and drag docs/demo.mp4 onto this line. GitHub replaces it with a user-attachments URL that plays inline. -->
+## Tuning your knee
 
 ![The kneepad tuning window. Sliders on the left, and on the right a plot of pointer speed against finger speed that is flat up to the knee at 149 mm/s and then rises.](docs/tuner.png)
 
-You set the curve with five sliders:
+The plot shows the curve. The shaded area is the constant zone. The dotted lines mark the knee and the pivot. When you touch the pad, a dot and a fading trail show your finger speed now. PEAK, under the plot, shows your top speed for 2 seconds after you move. When you move a slider, the curve and the pointer change at the same time.
+
+To put the knee where it fits your hands:
+
+1. Move your finger left and right at the speed you use for precise aiming. Read PEAK, or see where the dot and its trail sit on the plot. This is your aiming speed.
+2. Move the knee to just above your aiming speed with Pivot. A higher Pivot moves the knee to the right.
+3. Set Floor for how fast the pointer moves in the constant zone. Floor also moves the knee, so check the knee again after you change it.
+4. Set Ceiling and Curve for how far fast movements take the pointer. Curve also moves the knee a little, so check the knee again.
+5. Set Gain last. It makes the pointer faster or slower at every speed.
 
 | Slider | Default | What it does |
 |---|---|---|
-| Gain | 16 | Screen pixels per millimeter of finger travel, at the pivot speed. |
-| Floor | 0.60 | The multiplier for slow movement. It sets the height of the constant zone. A lower value gives more precision. |
-| Ceiling | 3.2 | The largest multiplier for fast movement. A higher value gives more reach. |
 | Pivot | 260 mm/s | The finger speed where the multiplier is exactly 1. It moves the knee. |
-| Curve | 0.92 | How steeply the curve climbs above the knee. |
+| Floor | 0.60 | The multiplier for slow movement. It sets the height of the constant zone, and moves the knee. A lower value gives more precision. |
+| Ceiling | 3.2 | The largest multiplier for fast movement. A higher value gives more reach. |
+| Curve | 0.92 | How steeply the curve climbs above the knee. It also moves the knee a little. |
+| Gain | 16 | Screen pixels per millimeter of finger travel at the pivot speed. It scales the pointer speed in both zones. |
 
-The floor and the pivot together set the knee. With the defaults, the knee is at about 149 mm/s, and the curve reaches the ceiling at about 920 mm/s.
+With the defaults, the knee is at about 149 mm/s, and the curve reaches the ceiling at about 920 mm/s.
 
 The app saves your values in `~/Library/Application Support/teach-touch/tuning.json`.
-
-Key Tuning Advice: Identify the finger speed cutoff for precise actions. Move your finger left/right across the trackpad at the speed you'd use for precise pointers. Look at the graph and see where the cluster sits. This is the pointer speed where you want the *knee* to sit. Once you've identified your "knee" position, tune the other options to preserve this knee position.
 
 ## Requirements
 
