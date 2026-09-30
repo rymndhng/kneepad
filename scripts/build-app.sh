@@ -16,6 +16,10 @@ cd "$(dirname "$0")/.."
 
 APP="build/Teach Touch.app"
 VERSION="1.0"
+# Stamped into the bundle so the window title and About panel say which build
+# is running — rebuilds are frequent and otherwise indistinguishable.
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+BUILD_NUMBER="$(date +%Y%m%d.%H%M)"
 
 echo "Building the app (release)…"
 swift build -c release --product tuner
@@ -42,7 +46,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key>           <string>Teach Touch</string>
     <key>CFBundlePackageType</key>           <string>APPL</string>
     <key>CFBundleShortVersionString</key>    <string>${VERSION}</string>
-    <key>CFBundleVersion</key>               <string>${VERSION}</string>
+    <key>CFBundleVersion</key>               <string>${BUILD_NUMBER}</string>
+    <key>TTBuildDate</key>                   <string>${BUILD_DATE}</string>
     <key>LSMinimumSystemVersion</key>        <string>13.0</string>
     <key>NSHighResolutionCapable</key>       <true/>
     <key>LSApplicationCategoryType</key>     <string>public.app-category.utilities</string>

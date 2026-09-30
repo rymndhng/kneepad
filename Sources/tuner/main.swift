@@ -632,6 +632,13 @@ final class TunerController: NSObject, NSWindowDelegate {
         super.init()
 
         window.title = "teach-touch tuning"
+        // Set by scripts/build-app.sh; absent under `swift run`, where the
+        // binary is fresh by definition.
+        if let stamp = Bundle.main.object(forInfoDictionaryKey: "TTBuildDate") as? String,
+           let built = ISO8601DateFormatter().date(from: stamp) {
+            let formatted = built.formatted(date: .abbreviated, time: .shortened)
+            window.title += " — built \(formatted)"
+        }
         window.delegate = self
         window.center()
 
