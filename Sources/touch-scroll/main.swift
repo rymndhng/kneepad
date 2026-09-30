@@ -23,6 +23,9 @@ func printUsage() {
       touch-scroll --friction N     momentum decay per tick (default 0.96)
       touch-scroll --flick N        mm/s release speed to start momentum (default 2)
       touch-scroll --activation N   mm of travel before scrolling starts
+      touch-scroll --vertical-slope N    |dx|/|dy| below which a scroll locks vertical (default 1.5)
+      touch-scroll --horizontal-slope N  |dy|/|dx| below which a scroll locks horizontal (default 0.3)
+      touch-scroll --no-axis-lock   let every scroll move on both axes
       touch-scroll --quiet          no per-event logging
       touch-scroll --dry-run        recognise but post nothing
 
@@ -109,6 +112,9 @@ do {
 let tracker = ContactTracker(layout: session.layout)
 let recognizer = ScrollRecognizer()
 if let a = value("--activation") { recognizer.activationDistance = a }
+if let s = value("--vertical-slope") { recognizer.verticalLockSlope = s }
+if let s = value("--horizontal-slope") { recognizer.horizontalLockSlope = s }
+if args.contains("--no-axis-lock") { recognizer.axisLockEnabled = false }
 let synthesizer = ScrollSynthesizer(configuration: config)
 
 func restoreAndExit(_ code: Int32) -> Never {

@@ -224,6 +224,72 @@ func runScrollRecognizerTests() {
                   "a deliberate stop must kill momentum, got \(update.velocity.y) mm/s")
         }
 
+        // Reported from real use: vertical scrolling kept getting caught by
+        // horizontal elements. A crooked start sent sideways deltas, and the
+        // app handed the whole gesture to the carousel under the cursor.
+        TestRunner.test("a crooked vertical swipe scrolls only vertically") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+
+            let began = try require(step(tracker, recognizer,
+                                         [contact(0, 13, 15), contact(1, 33, 15)], at: 1000))
+            check(began.phase == .began, "expected began")
+            expectClose(began.delta.x, 0, 0.001, "sideways drift is dropped")
+            expectClose(began.delta.y, 5, 0.001)
+            expectClose(began.velocity.x, 0, 0.001)
+
+            let changed = try require(step(tracker, recognizer,
+                                           [contact(0, 16, 20), contact(1, 36, 20)], at: 2000))
+            expectClose(changed.delta.x, 0, 0.001)
+            expectClose(changed.delta.y, 5, 0.001)
+
+            let ended = try require(step(tracker, recognizer, [], at: 3000))
+            check(ended.phase == .ended, "expected ended")
+            expectClose(ended.velocity.x, 0, 0.001, "momentum keeps to the axis")
+        }
+
+        TestRunner.test("the axis lock lasts the whole gesture") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+            _ = step(tracker, recognizer, [contact(0, 10, 15), contact(1, 30, 15)], at: 1000)
+
+            // Now purely sideways: still locked vertical.
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 20, 15), contact(1, 40, 15)], at: 2000))
+            expectClose(update.delta.x, 0, 0.001)
+        }
+
+        TestRunner.test("a slightly tilted horizontal swipe scrolls only horizontally") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 10, 30)], at: 0)
+
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 18, 11.5), contact(1, 18, 31.5)], at: 1000))
+            expectClose(update.delta.x, 8, 0.001)
+            expectClose(update.delta.y, 0, 0.001, "vertical drift is dropped")
+        }
+
+        TestRunner.test("a diagonal swipe moves on both axes") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 14, 12), contact(1, 34, 12)], at: 1000))
+            expectClose(update.delta.x, 4, 0.001)
+            expectClose(update.delta.y, 2, 0.001)
+        }
+
+        TestRunner.test("turning the axis lock off passes deltas through") {
+            let tracker = makeTracker(), recognizer = ScrollRecognizer()
+            recognizer.axisLockEnabled = false
+            _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)
+
+            let update = try require(step(tracker, recognizer,
+                                          [contact(0, 13, 15), contact(1, 33, 15)], at: 1000))
+            expectClose(update.delta.x, 3, 0.001)
+            expectClose(update.delta.y, 5, 0.001)
+        }
+
         TestRunner.test("a second scroll can start after the first ends") {
             let tracker = makeTracker(), recognizer = ScrollRecognizer()
             _ = step(tracker, recognizer, [contact(0, 10, 10), contact(1, 30, 10)], at: 0)

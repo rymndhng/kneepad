@@ -79,6 +79,29 @@ public final class ScrollRecognizer {
     /// Per-frame travel below which a frame counts as stationary.
     public var stopFrameTravel = 0.22
 
+    /// Which directions a scroll is allowed to move in. Decided once, when the
+    /// scroll engages, and kept until the fingers lift.
+    public enum Axis {
+        case vertical, horizontal, free
+    }
+
+    /// Snap each scroll to one axis unless it clearly started diagonal.
+    ///
+    /// Apps choose the axis from the first few events, and the first event
+    /// fires after well under a millimetre of travel. A vertical swipe that
+    /// begins even slightly crooked can read as sideways at that scale, and a
+    /// carousel or code block under the cursor takes the whole gesture.
+    public var axisLockEnabled = true
+    /// Lock vertical when sideways travel is less than this multiple of
+    /// vertical travel at activation — anything within ~56° of vertical. Wider
+    /// than the horizontal zone on purpose: most scrolling is vertical, and
+    /// snagging on a horizontal element is the worse mistake.
+    public var verticalLockSlope = 1.5
+    /// Lock horizontal when vertical travel is less than this multiple of
+    /// sideways travel — within ~17° of horizontal. Between the two zones the
+    /// scroll stays free, so panning a map diagonally still works.
+    public var horizontalLockSlope = 0.3
+
     private enum State {
         case idle
         /// Two fingers down, not yet moved far enough to commit. Each finger's
@@ -86,7 +109,7 @@ public final class ScrollRecognizer {
         /// a swipe needs to know which way each one went, not just where the
         /// pair ended up.
         case pending(origin: TwoFingerState, positions: [Int: Point])
-        case scrolling(last: Point)
+        case scrolling(last: Point, axis: Axis)
     }
 
     /// Centroid position and the time elapsed arriving at it.
@@ -189,6 +212,23 @@ public final class ScrollRecognizer {
         return a.x * b.x + a.y * b.y < 0
     }
 
+    /// The axis a scroll that has travelled `travel` so far should keep to.
+    private func axis(for travel: Point) -> Axis {
+        guard axisLockEnabled else { return .free }
+        let dx = abs(travel.x), dy = abs(travel.y)
+        if dx < dy * verticalLockSlope { return .vertical }
+        if dy < dx * horizontalLockSlope { return .horizontal }
+        return .free
+    }
+
+    private func constrain(_ p: Point, to axis: Axis) -> Point {
+        switch axis {
+        case .vertical: return Point(x: 0, y: p.y)
+        case .horizontal: return Point(x: p.x, y: 0)
+        case .free: return p
+        }
+    }
+
     /// Mean velocity of the two contacts — the pair moves as one unit.
     private func meanVelocity(_ tracks: [Track]) -> Point {
         guard !tracks.isEmpty else { return Point(x: 0, y: 0) }
@@ -204,11 +244,16 @@ public final class ScrollRecognizer {
 
         guard usable.count == 2, let now = TwoFingerState(usable) else {
             // Fewer (or more) than two fingers ends any scroll in progress.
-            let wasScrolling = isScrolling
-            let velocity = wasScrolling ? releaseVelocity() : Point(x: 0, y: 0)
+            // Momentum is seeded from this velocity, so constraining it keeps
+            // the glide on the same axis as the scroll.
+            guard case .scrolling(_, let axis) = state else {
+                state = .idle
+                history.removeAll()
+                return nil
+            }
+            let velocity = constrain(releaseVelocity(), to: axis)
             state = .idle
             history.removeAll()
-            guard wasScrolling else { return nil }
             return ScrollUpdate(phase: .ended, delta: Point(x: 0, y: 0), velocity: velocity)
         }
 
@@ -234,17 +279,19 @@ public final class ScrollRecognizer {
                 return nil
             }
 
-            state = .scrolling(last: now.centroid)
+            let delta = now.centroid - origin.centroid
+            let axis = axis(for: delta)
+            state = .scrolling(last: now.centroid, axis: axis)
             return ScrollUpdate(phase: .began,
-                                delta: now.centroid - origin.centroid,
-                                velocity: meanVelocity(usable))
+                                delta: constrain(delta, to: axis),
+                                velocity: constrain(meanVelocity(usable), to: axis))
 
-        case .scrolling(let last):
+        case .scrolling(let last, let axis):
             record(now.centroid, dt)
-            state = .scrolling(last: now.centroid)
+            state = .scrolling(last: now.centroid, axis: axis)
             return ScrollUpdate(phase: .changed,
-                                delta: now.centroid - last,
-                                velocity: meanVelocity(usable))
+                                delta: constrain(now.centroid - last, to: axis),
+                                velocity: constrain(meanVelocity(usable), to: axis))
         }
     }
 
