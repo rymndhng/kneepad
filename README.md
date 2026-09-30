@@ -18,7 +18,7 @@ The value proposition of kneepad is to let me create this acceleration profile. 
 
 The knee is the finger speed where the curve changes from the constant zone to the acceleration zone.
 
-<!-- VIDEO: on github.com, edit this file and drag docs/demo.mp4 onto this line. GitHub replaces it with a user-attachments URL that plays inline. -->
+https://github.com/user-attachments/assets/035eb3b9-510d-4597-938b-04cdf6a0746c
 
 Below the knee, the pointer moves the same distance for each millimeter of finger travel, at any speed. This zone is for aiming. Your hand learns one distance, and the pointer does not jump when you speed up a little.
 
