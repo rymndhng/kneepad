@@ -53,12 +53,26 @@ The app saves your values in `~/Library/Application Support/kneepad/tuning.json`
 ## Requirements
 
 - macOS 13 or later.
-- Swift 5.9 or later, from Xcode or the Xcode Command Line Tools.
 - A ZSA Voyager with the Navigator trackpad.
+- For the download: a Mac with Apple silicon.
+- To build from source: Swift 5.9 or later, from Xcode or the Xcode Command Line Tools.
 
 ## Install
 
-kneepad installs from source. The pad works only while the app is open. When you quit the app, the pad goes back to its normal mouse mode.
+The pad works only while the app is open. When you quit the app, the pad goes back to its normal mouse mode.
+
+### Download
+
+The download is not notarized by Apple, so macOS blocks it the first time you open it. You allow it one time in System Settings.
+
+1. Download the `.zip` file from the [latest release](https://github.com/rymndhng/kneepad/releases/latest).
+2. Double-click the `.zip` file to unzip it. Move `Kneepad.app` to `/Applications`.
+3. Open Kneepad. macOS shows a message that it cannot verify the app. Click Done.
+4. Open System Settings > Privacy & Security. Scroll down to Security. Next to the message that Kneepad was blocked, click Open Anyway. Then enter your password and click Open Anyway again.
+5. In System Settings > Privacy & Security > Input Monitoring, allow Kneepad. Then quit the app and open it again.
+6. In System Settings > Privacy & Security > Accessibility, allow Kneepad.
+
+### Build from source
 
 1. Optional: run `./scripts/create-signing-identity.sh` one time. It creates a local signing identity, so that macOS keeps its permissions for kneepad after each rebuild. If you skip this step, macOS asks for the permissions again after every build.
 2. Run `./scripts/build-app.sh`. The script builds `build/Kneepad.app`.
