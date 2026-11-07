@@ -724,6 +724,8 @@ final class TunerController: NSObject, NSWindowDelegate {
                0.05...0.8, 2, { $0.scrollDecay }, { $0.scrollDecay = $1 })
         toggle("Inertia", { $0.momentumEnabled }, { $0.momentumEnabled = $1 })
         toggle("Natural direction", { $0.naturalScroll }, { $0.naturalScroll = $1 })
+        toggle("Snap to vertical or horizontal",
+               { $0.scrollAxisLock }, { $0.scrollAxisLock = $1 })
 
         controls = tapControls
 

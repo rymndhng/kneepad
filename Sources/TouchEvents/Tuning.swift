@@ -30,6 +30,9 @@ public struct Tuning: Codable, Equatable {
     public var scrollDecay = 0.27
     public var naturalScroll = true
     public var momentumEnabled = true
+    /// Snap each scroll to vertical or horizontal unless it starts clearly
+    /// diagonal. Off lets every scroll move freely, which suits panning a map.
+    public var scrollAxisLock = true
 
     // Taps
     public var tapEnabled = true
@@ -105,6 +108,10 @@ public struct Tuning: Codable, Equatable {
         config.momentumEnabled = momentumEnabled
     }
 
+    public func apply(to recognizer: ScrollRecognizer) {
+        recognizer.axisLockEnabled = scrollAxisLock
+    }
+
     public func apply(to recognizer: PointerRecognizer) {
         recognizer.twoFingerTapEnabled = tapEnabled && rightTapEnabled
         recognizer.tapMaxDuration = tapTime
@@ -113,6 +120,50 @@ public struct Tuning: Codable, Equatable {
         recognizer.twoFingerTapMaxTravel = twoTapTravel
         recognizer.doubleTapInterval = doubleTapTime
         recognizer.doubleTapMaxDistance = doubleTapDistance
+    }
+}
+
+extension Tuning {
+    /// Any key missing from the file keeps its default.
+    ///
+    /// The synthesised decoder rejects the whole file when one key is absent,
+    /// so every new setting would make an existing `tuning.json` unreadable and
+    /// reset everything the user had tuned. A field added to `Tuning` must be
+    /// added here too; the round-trip test catches one that is not.
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func read<T: Decodable>(_ key: CodingKeys, _ value: inout T) throws {
+            if let decoded = try container.decodeIfPresent(T.self, forKey: key) {
+                value = decoded
+            }
+        }
+        func read(_ key: CodingKeys, _ value: inout Double?) throws {
+            value = try container.decodeIfPresent(Double.self, forKey: key)
+        }
+        try read(.pointerGain, &pointerGain)
+        try read(.accelEnabled, &accelEnabled)
+        try read(.accelMin, &accelMin)
+        try read(.accelMax, &accelMax)
+        try read(.accelCurve, &accelCurve)
+        try read(.accelPivot, &accelPivot)
+        try read(.stopGateEnabled, &stopGateEnabled)
+        try read(.armSpeed, &armSpeed)
+        try read(.stopSpeed, &stopSpeed)
+        try read(.scrollGain, &scrollGain)
+        try read(.scrollDecay, &scrollDecay)
+        try read(.naturalScroll, &naturalScroll)
+        try read(.momentumEnabled, &momentumEnabled)
+        try read(.scrollAxisLock, &scrollAxisLock)
+        try read(.tapEnabled, &tapEnabled)
+        try read(.rightTapEnabled, &rightTapEnabled)
+        try read(.tapTime, &tapTime)
+        try read(.tapTravel, &tapTravel)
+        try read(.twoTapTime, &twoTapTime)
+        try read(.twoTapTravel, &twoTapTravel)
+        try read(.doubleTapTime, &doubleTapTime)
+        try read(.doubleTapDistance, &doubleTapDistance)
+        try read(.surfaceWidth, &surfaceWidth)
     }
 }
 

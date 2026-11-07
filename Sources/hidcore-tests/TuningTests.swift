@@ -56,6 +56,7 @@ func runTuningTests() {
             tuning.scrollDecay = 0.19
             tuning.naturalScroll = false
             tuning.momentumEnabled = false
+            tuning.scrollAxisLock = false
             tuning.tapEnabled = false
             tuning.rightTapEnabled = false
             tuning.tapTime = 0.31
@@ -100,6 +101,31 @@ func runTuningTests() {
             expectClose(pointer.stopGate.stopSpeed, 45, 1e-9)
             expectClose(scroll.gain, 50, 1e-9)
             expectClose(recognizer.tapMaxTravel, 1.5, 1e-9)
+        }
+
+        TestRunner.test("turning the axis lock off reaches the scroll recognizer") {
+            var tuning = Tuning()
+            tuning.scrollAxisLock = false
+            let recognizer = ScrollRecognizer()
+            tuning.apply(to: recognizer)
+            check(!recognizer.axisLockEnabled, "axis lock still on")
+            check(Tuning().scrollAxisLock == ScrollRecognizer().axisLockEnabled,
+                  "default disagrees with the recognizer")
+        }
+
+        // A file saved before a setting existed lacks its key. Failing the
+        // whole decode would reset everything the user had tuned.
+        TestRunner.test("a file missing a key keeps the rest and defaults the gap") {
+            let url = temporaryURL()
+            defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(#"{"pointerGain": 21, "surfaceWidth": 30}"#.utf8).write(to: url)
+
+            let loaded = try require(Tuning.load(from: url))
+            expectClose(loaded.pointerGain, 21, 1e-9)
+            expectClose(loaded.surfaceWidth ?? 0, 30, 1e-9)
+            check(loaded.scrollAxisLock, "missing key should take its default")
         }
 
         // The tuner plots this. If it were a second copy of the formula the

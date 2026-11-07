@@ -155,6 +155,7 @@ public final class TouchDriver {
         tuning.apply(to: &pointerSynthesizer.configuration)
         tuning.apply(to: &scrollSynthesizer.configuration)
         tuning.apply(to: pointerRecognizer)
+        tuning.apply(to: scrollRecognizer)
         if !options.tapLocked { options.tapEnabled = tuning.tapEnabled }
     }
 
